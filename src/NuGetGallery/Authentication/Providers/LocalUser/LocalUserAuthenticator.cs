@@ -1,7 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using Microsoft.Owin;
 using Microsoft.Owin.Security;
 using Microsoft.Owin.Security.Cookies;
@@ -12,21 +12,23 @@ namespace NuGetGallery.Authentication.Providers.Cookie
 {
     public class LocalUserAuthenticator : Authenticator
     {
-        protected override void AttachToOwinApp(ConfigurationService config, IAppBuilder app)
+        protected override void AttachToOwinApp(IGalleryConfigurationService config, IAppBuilder app)
         {
-            var cookieSecurity = config.Current.RequireSSL ? 
-                CookieSecureOption.Always : 
+            var cookieSecurity = config.Current.RequireSSL ?
+                CookieSecureOption.Always :
                 CookieSecureOption.Never;
 
-            var options = new CookieAuthenticationOptions()
+            var options = new CookieAuthenticationOptions
             {
                 AuthenticationType = AuthenticationTypes.LocalUser,
                 AuthenticationMode = AuthenticationMode.Active,
                 CookieHttpOnly = true,
                 CookieSecure = cookieSecurity,
-                LoginPath = new PathString("/users/account/LogOn")
+                LoginPath = new PathString("/users/account/LogOn"),
+                ExpireTimeSpan = TimeSpan.FromHours(6),
+                SlidingExpiration = true
             };
-            
+
             BaseConfig.ApplyToOwinSecurityOptions(options);
             app.UseCookieAuthentication(options);
             app.SetDefaultSignInAsAuthenticationType(AuthenticationTypes.LocalUser);
@@ -34,7 +36,7 @@ namespace NuGetGallery.Authentication.Providers.Cookie
 
         protected internal override AuthenticatorConfiguration CreateConfigObject()
         {
-            return new AuthenticatorConfiguration()
+            return new AuthenticatorConfiguration
             {
                 AuthenticationType = AuthenticationTypes.LocalUser,
                 Enabled = false

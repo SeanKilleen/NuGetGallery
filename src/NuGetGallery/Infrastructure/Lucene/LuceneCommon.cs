@@ -1,4 +1,6 @@
-﻿using System.IO;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System.IO;
 using Lucene.Net.Util;
 using System.Web.Hosting;
 using Lucene.Net.Store;
@@ -19,7 +21,7 @@ namespace NuGetGallery
         internal static string GetDirectoryLocation()
         {
             // Don't create the directory if it's not already present.
-            return _directorySingleton == null ? null : _directorySingleton.Directory.FullName;
+            return _directorySingleton?.Directory.FullName;
         }
 
         internal static string GetIndexMetadataPath()

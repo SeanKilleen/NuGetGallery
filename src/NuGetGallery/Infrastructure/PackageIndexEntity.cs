@@ -1,9 +1,11 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Web;
 using Lucene.Net.Documents;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
@@ -12,8 +14,6 @@ namespace NuGetGallery
         internal static readonly char[] IdSeparators = new[] { '.', '-' };
 
         public Package Package { get; set; }
-
-        public IEnumerable<int> CuratedFeedKeys { get; set; }
 
         public PackageIndexEntity() { }
 
@@ -33,14 +33,6 @@ namespace NuGetGallery
                     Field.Index.NOT_ANALYZED));
 
             document.Add(new Field("Key", Package.Key.ToString(CultureInfo.InvariantCulture), Field.Store.YES, Field.Index.NOT_ANALYZED));
-
-            if (CuratedFeedKeys != null)
-            {
-                foreach (var feedKey in CuratedFeedKeys)
-                {
-                    document.Add(new Field("CuratedFeedKey", feedKey.ToString(CultureInfo.InvariantCulture), Field.Store.NO, Field.Index.NOT_ANALYZED));
-                }
-            }
 
             var field = new Field("Id-Exact", Package.PackageRegistration.Id.ToLowerInvariant(), Field.Store.NO, Field.Index.NOT_ANALYZED);
 
@@ -118,9 +110,11 @@ namespace NuGetGallery
             document.Add(new Field("Copyright", Package.Copyright.ToStringSafe(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("Created", Package.Created.ToString(CultureInfo.InvariantCulture), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("FlattenedDependencies", Package.FlattenedDependencies.ToStringSafe(), Field.Store.YES, Field.Index.NO));
+            document.Add(new Field("FlattenedPackageTypes", Package.FlattenedPackageTypes.ToStringSafe(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("Hash", Package.Hash.ToStringSafe(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("HashAlgorithm", Package.HashAlgorithm.ToStringSafe(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("Id-Original", Package.PackageRegistration.Id, Field.Store.YES, Field.Index.NO));
+            document.Add(new Field("IsVerified-Original", Package.PackageRegistration.IsVerified.ToString(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("LastUpdated", Package.LastUpdated.ToString(CultureInfo.InvariantCulture), Field.Store.YES, Field.Index.NO));
             if (Package.LastEdited != null)
             {
@@ -131,12 +125,12 @@ namespace NuGetGallery
             document.Add(new Field("LicenseUrl", Package.LicenseUrl.ToStringSafe(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("MinClientVersion", Package.MinClientVersion.ToStringSafe(), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("Version", Package.Version.ToStringSafe(), Field.Store.YES, Field.Index.NO));
-            
-            string normalizedVersion = String.IsNullOrEmpty(Package.NormalizedVersion) ? 
-                SemanticVersionExtensions.Normalize(Package.Version) : 
+
+            string normalizedVersion = String.IsNullOrEmpty(Package.NormalizedVersion) ?
+                NuGetVersionFormatter.Normalize(Package.Version) :
                 Package.NormalizedVersion;
             document.Add(new Field("NormalizedVersion", normalizedVersion.ToStringSafe(), Field.Store.YES, Field.Index.NO));
-            
+
             document.Add(new Field("VersionDownloadCount", Package.DownloadCount.ToString(CultureInfo.InvariantCulture), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("PackageFileSize", Package.PackageFileSize.ToString(CultureInfo.InvariantCulture), Field.Store.YES, Field.Index.NO));
             document.Add(new Field("ProjectUrl", Package.ProjectUrl.ToStringSafe(), Field.Store.YES, Field.Index.NO));
@@ -158,6 +152,8 @@ namespace NuGetGallery
             // Fields meant for filtering, also storing data to avoid hitting SQL while doing searches
             document.Add(new Field("IsLatest", Package.IsLatest.ToString(), Field.Store.YES, Field.Index.NOT_ANALYZED));
             document.Add(new Field("IsLatestStable", Package.IsLatestStable.ToString(), Field.Store.YES, Field.Index.NOT_ANALYZED));
+            document.Add(new Field("IsLatestSemVer2", Package.IsLatestSemVer2.ToString(), Field.Store.YES, Field.Index.NOT_ANALYZED));
+            document.Add(new Field("IsLatestStableSemVer2", Package.IsLatestStableSemVer2.ToString(), Field.Store.YES, Field.Index.NOT_ANALYZED));
 
             // Fields meant for filtering, sorting
             document.Add(new Field("PublishedDate", Package.Published.Ticks.ToString(CultureInfo.InvariantCulture), Field.Store.NO, Field.Index.NOT_ANALYZED));
@@ -182,6 +178,7 @@ namespace NuGetGallery
         {
             var split = term.Split(IdSeparators, StringSplitOptions.RemoveEmptyEntries);
             var tokenized = split.SelectMany(CamelCaseTokenize);
+
             return tokenized.Any() ? string.Join(" ", tokenized) : "";
         }
 
@@ -206,6 +203,7 @@ namespace NuGetGallery
                 yield break;
             }
 
+            int tokenCount = 0;
             int tokenEnd = term.Length;
             for (int i = term.Length - 1; i > 0; i--)
             {
@@ -219,12 +217,16 @@ namespace NuGetGallery
                     }
 
                     yield return term.Substring(i, tokenEnd - i);
+                    tokenCount++;
                     tokenEnd = i;
                 }
             }
 
-            // Finally return the term in entirety
-            yield return term;
+            // Finally return the term in entirety, if not already returned
+            if (tokenCount != 1)
+            {
+                yield return term;
+            }
         }
     }
 }

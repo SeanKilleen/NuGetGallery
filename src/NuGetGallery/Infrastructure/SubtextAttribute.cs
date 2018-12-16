@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Web;
 using System.Web.Mvc;
 
@@ -26,8 +28,9 @@ namespace NuGetGallery
         {
             if (metadata == null)
             {
-                throw new ArgumentNullException("metadata");
+                throw new ArgumentNullException(nameof(metadata));
             }
+
             metadata.AdditionalValues["Subtext"] = AllowHtml ? (object)new HtmlString(Subtext) : Subtext;
         }
     }

@@ -1,18 +1,14 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Security.Claims;
-using System.Text.RegularExpressions;
-using System.Web;
+using System.Web.Mvc;
 using NuGetGallery.Authentication.Providers;
+using NuGetGallery.Infrastructure;
 
 namespace NuGetGallery
 {
-    // I moved these in to one file because they are so interconnected it didn't 
-    // make sense to look at them separately
-    //  - anurse
-
     public class LogOnViewModel
     {
         public AssociateExternalAccountViewModel External { get; set; }
@@ -20,11 +16,15 @@ namespace NuGetGallery
         public RegisterViewModel Register { get; set; }
         public IList<AuthenticationProviderViewModel> Providers { get; set; }
 
-        public LogOnViewModel() { }
+        public LogOnViewModel()
+            : this(new SignInViewModel())
+        {
+        }
 
-        public LogOnViewModel(SignInViewModel signIn)
+        internal LogOnViewModel(SignInViewModel signIn)
         {
             SignIn = signIn;
+            Register = new RegisterViewModel();
         }
     }
 
@@ -33,6 +33,15 @@ namespace NuGetGallery
         public string ProviderAccountNoun { get; set; }
         public string AccountName { get; set; }
         public bool FoundExistingUser { get; set; }
+        public bool ExistingUserCanBeLinked => ExistingUserLinkingError == ExistingUserLinkingErrorType.None;
+        public ExistingUserLinkingErrorType ExistingUserLinkingError { get; set; }
+
+        public enum ExistingUserLinkingErrorType
+        {
+            None = (int)default(ExistingUserLinkingErrorType),
+            AccountIsOrganization,
+            AccountIsAlreadyLinked
+        }
     }
 
     public class SignInViewModel
@@ -45,6 +54,7 @@ namespace NuGetGallery
         [Required]
         [DataType(DataType.Password)]
         [Hint("Passwords must be at least 7 characters long.")]
+        [AllowHtml]
         public string Password { get; set; }
 
         public SignInViewModel() { }
@@ -57,52 +67,27 @@ namespace NuGetGallery
 
     public class RegisterViewModel
     {
-        // Note: regexes must be tested to work in javascript
-        // We do NOT follow strictly the RFCs at this time, and we choose not to support many obscure email address variants. 
-        // Specifically the following are not supported by-design:
-        //  * Addresses containing () or []
-        //  * Second parts with no dots (i.e. foo@localhost or foo@com)
-        //  * Addresses with quoted (" or ') first parts
-        //  * Addresses with IP Address second parts (foo@[127.0.0.1])
-        internal const string FirstPart = @"[-A-Za-z0-9!#$%&'*+\/=?^_`{|}~\.]+";
-        internal const string SecondPart = @"[A-Za-z0-9]+[\w\.-]*[A-Za-z0-9]*\.[A-Za-z0-9][A-Za-z\.]*[A-Za-z]";
-        internal const string EmailValidationRegex = "^" + FirstPart + "@" + SecondPart + "$";
+        public const string EmailHint = "Your email will not be public unless you choose to disclose it. " +
+                                          "It is required to verify your registration and for password retrieval, important notifications, etc. ";
 
-        internal const string EmailValidationErrorMessage = "This doesn't appear to be a valid email address.";
-
-        internal const string UsernameValidationRegex =
-            @"[A-Za-z0-9][A-Za-z0-9_\.-]+[A-Za-z0-9]";
-
-        /// <summary>
-        /// Regex that matches INVALID username characters, to make it easy to strip those characters out.
-        /// </summary>
-        internal static readonly Regex UsernameNormalizationRegex =
-            new Regex(@"[^A-Za-z0-9_\.-]");
-
-        internal const string UsernameValidationErrorMessage =
-            "User names must start and end with a letter or number, and may only contain letters, numbers, underscores, periods, and hyphens in between.";
+        public const string UserNameHint = "Choose something unique so others will know which contributions are yours.";
 
         [Required]
         [StringLength(255)]
         [Display(Name = "Email")]
-        //[DataType(DataType.EmailAddress)] - does not work with client side validation
-        [RegularExpression(EmailValidationRegex, ErrorMessage = EmailValidationErrorMessage)]
-        [Hint(
-            "Your email will not be public unless you choose to disclose it. " +
-            "It is required to verify your registration and for password retrieval, important notifications, etc. ")]
+        [RegularExpression(GalleryConstants.EmailValidationRegex, ErrorMessage = GalleryConstants.EmailValidationErrorMessage)]
         [Subtext("We use <a href=\"http://www.gravatar.com\" target=\"_blank\">Gravatar</a> to get your profile picture", AllowHtml = true)]
         public string EmailAddress { get; set; }
 
         [Required]
         [StringLength(64)]
-        [RegularExpression(UsernameValidationRegex, ErrorMessage = UsernameValidationErrorMessage)]
-        [Hint("Choose something unique so others will know which contributions are yours.")]
+        [RegularExpression(GalleryConstants.UsernameValidationRegex, ErrorMessage = GalleryConstants.UsernameValidationErrorMessage)]
         public string Username { get; set; }
 
         [Required]
         [DataType(DataType.Password)]
-        [StringLength(64, MinimumLength = 7)]
-        [Hint("Passwords must be at least 7 characters long.")]
+        [PasswordValidation]
+        [AllowHtml]
         public string Password { get; set; }
     }
 

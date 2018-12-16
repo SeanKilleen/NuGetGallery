@@ -1,12 +1,14 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Web;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 namespace NuGetGallery
 {
     public class SubmitPackageRequest
     {
-        [Required]
-        [Hint("Your package file will be uploaded and hosted on the gallery server.")]
-        public HttpPostedFile PackageFile { get; set; }
+        public bool IsUploadInProgress => InProgressUpload != null;
+
+        public VerifyPackageRequest InProgressUpload { get; set; }
+
+        public bool IsSymbolsUploadEnabled { get; set; }
     }
 }

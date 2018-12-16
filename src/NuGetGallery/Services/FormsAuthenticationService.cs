@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Generic;
 using System.Web;
 using System.Web.Security;
@@ -14,8 +16,6 @@ namespace NuGetGallery
         {
             _configuration = configuration;
         }
-
-        private const string ForceSSLCookieName = "ForceSSL";
 
         public void SetAuthCookie(
             string userName,
@@ -46,40 +46,11 @@ namespace NuGetGallery
                 Secure = _configuration.RequireSSL
             };
             context.Response.Cookies.Add(formsCookie);
-
-            if (_configuration.RequireSSL)
-            {
-                // Drop a second cookie indicating that the user is logged in via SSL (no secret data, just tells us to redirect them to SSL)
-                context.Response.Cookies.Add(new HttpCookie(ForceSSLCookieName, "true"));
-            }
         }
 
         public void SignOut()
         {
             FormsAuthentication.SignOut();
-
-            // Delete the "LoggedIn" cookie
-            HttpContext context = HttpContext.Current;
-            var cookie = context.Request.Cookies[ForceSSLCookieName];
-            if (cookie != null)
-            {
-                cookie.Expires = DateTime.Now.AddDays(-1d);
-                context.Response.Cookies.Add(cookie);
-            }
-        }
-
-
-        public bool ShouldForceSSL(HttpContextBase context)
-        {
-            var cookie = context.Request.Cookies[ForceSSLCookieName];
-            
-            bool value;
-            if (cookie != null && Boolean.TryParse(cookie.Value, out value))
-            {
-                return value;
-            }
-            
-            return false;
         }
     }
 }

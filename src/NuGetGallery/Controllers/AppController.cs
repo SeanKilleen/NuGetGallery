@@ -1,32 +1,33 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System.Net;
 using System.Security.Claims;
-using System.Security.Principal;
-using System.Linq;
+using System.Threading;
 using System.Web;
 using System.Web.Mvc;
 using Microsoft.Owin;
-using Ninject;
-using NuGetGallery.Authentication;
-using System.Net;
-using NuGetGallery.Configuration;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
-    public abstract partial class AppController : Controller
+    public abstract partial class AppController
+        : Controller
     {
         private IOwinContext _overrideContext;
 
-        public IOwinContext OwinContext
-        {
-            get { return _overrideContext ?? HttpContext.GetOwinContext(); }
-            set { _overrideContext = value; }
-        }
+        public IOwinContext OwinContext => _overrideContext ?? HttpContext.GetOwinContext();
 
-        public NuGetContext NuGetContext { get; private set; }
+        public NuGetContext NuGetContext { get; }
 
         public new ClaimsPrincipal User
         {
             get { return base.User as ClaimsPrincipal; }
+        }
+
+        public void SetOwinContextOverride(IOwinContext owinContext)
+        {
+            _overrideContext = owinContext;
         }
 
         protected AppController()
@@ -39,7 +40,7 @@ namespace NuGetGallery
             return DependencyResolver.Current.GetService<T>();
         }
 
-        protected internal User GetCurrentUser()
+        protected internal virtual User GetCurrentUser()
         {
             return OwinContext.GetCurrentUser();
         }
@@ -48,21 +49,52 @@ namespace NuGetGallery
         {
             return new SafeRedirectResult(returnUrl, Url.Home());
         }
-    }
 
-    public class NuGetContext
-    {
-        private Lazy<User> _currentUser;
-        
-        public ConfigurationService Config { get; internal set; }
-        public User CurrentUser { get { return _currentUser.Value; } }
-
-        public NuGetContext(AppController ctrl)
+        /// <summary>
+        /// This method is to set TrySkipIisCustomErrors flag on failed requests so Json returns for failed requests don't get overwritten by IIS.
+        /// </summary>
+        /// <param name="statusCode">HTTP status code for response</param>
+        /// <param name="obj">Object to Jsonify and return</param>
+        /// <returns></returns>
+        protected internal JsonResult Json(HttpStatusCode statusCode, object obj, JsonRequestBehavior jsonRequestBehavior)
         {
-            Config = Container.Kernel.TryGet<ConfigurationService>();
+            Response.StatusCode = (int)statusCode;
+            if (statusCode >= HttpStatusCode.BadRequest)
+            {
+                Response.TrySkipIisCustomErrors = true;
+            }
 
-            _currentUser = new Lazy<User>(() =>
-                ctrl.OwinContext.GetCurrentUser());
+            return Json(obj, jsonRequestBehavior);
+        }
+
+        protected internal JsonResult Json(HttpStatusCode statusCode)
+        {
+            return Json(statusCode, obj: new { }, jsonRequestBehavior: JsonRequestBehavior.DenyGet);
+        }
+
+        protected internal JsonResult Json(HttpStatusCode statusCode, object obj)
+        {
+            return Json(statusCode, obj, JsonRequestBehavior.DenyGet);
+        }
+
+        /// <summary>
+        /// Called before the action method is invoked.
+        /// </summary>
+        /// <param name="filterContext">Information about the current request and action.</param>
+        protected override void OnActionExecuting(ActionExecutingContext filterContext)
+        {
+            if (!filterContext.IsChildAction)
+            {
+                //no need to do the hassle for a child action
+                //set the culture from the request headers
+                var clientCulture = Request.DetermineClientCulture();
+                if (clientCulture != null)
+                {
+                    Thread.CurrentThread.CurrentCulture = clientCulture;
+                }
+            }
+
+            base.OnActionExecuting(filterContext);
         }
     }
 }

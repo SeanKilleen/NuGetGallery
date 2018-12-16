@@ -1,10 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Microsoft.Owin;
-using Moq;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System.Net;
+using System.Web.Mvc;
+using NuGet.Services.Entities;
 using NuGetGallery.Framework;
 using Xunit;
 
@@ -19,7 +18,7 @@ namespace NuGetGallery.Controllers
             {
                 // Arrange
                 var ctrl = new TestableAppController();
-                ctrl.OwinContext = Fakes.CreateOwinContext();
+                ctrl.SetOwinContextOverride(Fakes.CreateOwinContext());
 
                 // Act
                 var user = ctrl.InvokeGetCurrentUser();
@@ -29,10 +28,37 @@ namespace NuGetGallery.Controllers
             }
         }
 
+        public class TheJsonMethod : TestContainer
+        {
+            [Fact]
+            public void AllowsJsonRequestBehaviorToBeSpecified()
+            {
+                // Arrange
+                var controller = GetController<TestableAppController>();
+
+                // Act
+                var output = controller.Json(HttpStatusCode.BadRequest, null, JsonRequestBehavior.AllowGet);
+
+                // Assert
+                Assert.Equal(JsonRequestBehavior.AllowGet, output.JsonRequestBehavior);
+            }
+
+            [Fact]
+            public void DefaultsToDenyGet()
+            {
+                // Arrange
+                var controller = GetController<TestableAppController>();
+
+                // Act
+                var output = controller.Json(HttpStatusCode.BadRequest, null);
+
+                // Assert
+                Assert.Equal(JsonRequestBehavior.DenyGet, output.JsonRequestBehavior);
+            }
+        }
+
         public class TestableAppController : AppController
         {
-            // Nothing but a concrete class to test an abstract class :)
-
             public User InvokeGetCurrentUser()
             {
                 return GetCurrentUser();

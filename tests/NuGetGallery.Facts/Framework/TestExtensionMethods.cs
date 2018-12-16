@@ -1,13 +1,18 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Owin;
 using Moq;
+using Newtonsoft.Json;
+using NuGet.Services.Entities;
 using NuGetGallery.Authentication;
+using AuthenticationTypes = NuGetGallery.Authentication.AuthenticationTypes;
 
 namespace NuGetGallery
 {
@@ -15,15 +20,40 @@ namespace NuGetGallery
     {
         /// <summary>
         /// Should only be used in the rare cases where you are testing an action that
-        /// does NOT use AppController.GetCurrentUser()! In those cases, use 
+        /// does NOT use AppController.GetCurrentUser()! In those cases, use
         /// TestExtensionMethods.SetCurrentUser(AppController, User) instead.
         /// </summary>
-        /// <param name="name"></param>
-        public static void SetCurrentUser(this AppController self, string name)
+        public static void SetOwinContextCurrentUser(this AppController self, User user, Credential credential = null)
         {
-            var principal = new ClaimsPrincipal(
-                new ClaimsIdentity(
-                    new [] { new Claim(ClaimTypes.Name, String.IsNullOrEmpty(name) ? "theUserName" : name) }));
+            if (user == null)
+            {
+                self.OwinContext.Request.User = null;
+                return;
+            }
+
+            ClaimsIdentity identity = null;
+
+            if (credential != null)
+            {
+                identity = AuthenticationService.CreateIdentity(
+                    user,
+                    AuthenticationTypes.ApiKey,
+                    new Claim(NuGetClaims.ApiKey, credential.Value),
+                    new Claim(NuGetClaims.Scope, JsonConvert.SerializeObject(credential.Scopes, Formatting.None)));
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(user.Username))
+                {
+                    user.Username = "theUsername";
+                }
+
+                identity = AuthenticationService.CreateIdentity(
+                    user,
+                    AuthenticationTypes.External);
+            }
+
+            var principal = new ClaimsPrincipal(identity);
 
             var mock = Mock.Get(self.HttpContext);
             mock.Setup(c => c.Request.IsAuthenticated).Returns(true);
@@ -32,10 +62,32 @@ namespace NuGetGallery
             self.OwinContext.Request.User = principal;
         }
 
-        public static void SetCurrentUser(this AppController self, User user)
+        public static void SetCurrentUser(this AppController self, User user, ICollection<Scope> scopes)
         {
-            SetCurrentUser(self, user.Username);
-            self.OwinContext.Environment[Constants.CurrentUserOwinEnvironmentKey] = user;
+            var credential =
+                TestCredentialHelper
+                    .CreateV4ApiKey(expiration: null, plaintextApiKey: out var plaintextApiKey)
+                    .WithScopes(scopes);
+
+            self.SetCurrentUser(user, credential);
+        }
+
+        public static void SetCurrentUser(this AppController self, User user, Credential credential = null)
+        {
+            self.SetOwinContextCurrentUser(user, credential);
+            self.SetCurrentUserOwinEnvironmentKey(user);
+        }
+
+        private static void SetCurrentUserOwinEnvironmentKey(this AppController self, User user)
+        {
+            if (user != null)
+            {
+                self.OwinContext.Environment[GalleryConstants.CurrentUserOwinEnvironmentKey] = user;
+            }
+            else
+            {
+                self.OwinContext.Environment.Remove(GalleryConstants.CurrentUserOwinEnvironmentKey);
+            }
         }
 
         public static async Task<byte[]> CaptureBody(this IOwinResponse self, Func<Task> captureWithin)
@@ -58,4 +110,3 @@ namespace NuGetGallery
         }
     }
 }
-

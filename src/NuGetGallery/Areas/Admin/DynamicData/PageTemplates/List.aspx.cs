@@ -1,14 +1,18 @@
-﻿using System;
+using System;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Data.Entity.Core.Objects;
 using System.Linq;
 using System.Web.DynamicData;
 using System.Web.Routing;
 using System.Web.UI;
 using System.Web.UI.WebControls;
 using System.Web.UI.WebControls.Expressions;
+using NuGetGallery.Areas.Admin.DynamicData;
 
-namespace NuGetGallery.Areas.Admin.DynamicData
+namespace NuGetGallery
 {
-    public partial class List : Page
+    public partial class List : System.Web.UI.Page
     {
         protected MetaTable table;
 
@@ -18,18 +22,29 @@ namespace NuGetGallery.Areas.Admin.DynamicData
             GridView1.SetMetaTable(table, table.GetColumnValuesFromRoute(Context));
             GridDataSource.EntityTypeFilter = table.EntityType.Name;
 
-            // Set the search data fields to all the string columns
+            GridDataSource.ContextCreating += (o, args) =>
+            {
+                args.Context = (ObjectContext)table.CreateContext();
+            };
+
+            // Set the search data fields to all the string columns 
             var searchExpression = (SearchExpression)GridQueryExtender.Expressions[1];
             searchExpression.DataFields = String.Join(",", table.Columns.Where(c => c.IsString).Select(c => c.Name));
-            if (String.IsNullOrEmpty(searchExpression.DataFields))
+            if (string.IsNullOrEmpty(searchExpression.DataFields))
             {
-                // No string fields, remove the search elements
+                // No string fields, remove the search elements 
                 SearchPanel.Visible = false;
                 GridQueryExtender.Expressions.Remove(searchExpression);
             }
+            ViewStateUserKey = User.Identity.Name;
+        }
+
+        protected void Page_Load(object sender, EventArgs e)
+        {
+            Title = table.DisplayName;
+            GridDataSource.Include = table.ForeignKeyColumnsNames;
 
             // Disable various options if the table is readonly
-            GridView1.ColumnsGenerator = new OrderedFieldGenerator(table);
             if (table.IsReadOnly)
             {
                 GridView1.Columns[0].Visible = false;
@@ -38,17 +53,11 @@ namespace NuGetGallery.Areas.Admin.DynamicData
             }
         }
 
-        protected void Page_Load(object sender, EventArgs e)
-        {
-            Title = table.DisplayName;
-            GridDataSource.Include = table.ForeignKeyColumnsNames;
-        }
-
         protected void Label_PreRender(object sender, EventArgs e)
         {
-            var label = (Label)sender;
-            var dynamicFilter = (DynamicFilter)label.FindControl("DynamicFilter");
-            var fuc = dynamicFilter.FilterTemplate as QueryableFilterUserControl;
+            Label label = (Label)sender;
+            DynamicFilter dynamicFilter = (DynamicFilter)label.FindControl("DynamicFilter");
+            QueryableFilterUserControl fuc = dynamicFilter.FilterTemplate as QueryableFilterUserControl;
             if (fuc != null && fuc.FilterControl != null)
             {
                 label.AssociatedControlID = fuc.FilterControl.GetUniqueIDRelativeTo(label);
@@ -57,7 +66,7 @@ namespace NuGetGallery.Areas.Admin.DynamicData
 
         protected override void OnPreRenderComplete(EventArgs e)
         {
-            var routeValues = new RouteValueDictionary(GridView1.GetDefaultValues());
+            RouteValueDictionary routeValues = new RouteValueDictionary(GridView1.GetDefaultValues());
             InsertHyperLink.NavigateUrl = table.GetActionPath(PageAction.Insert, routeValues);
             base.OnPreRenderComplete(e);
         }
@@ -66,5 +75,6 @@ namespace NuGetGallery.Areas.Admin.DynamicData
         {
             GridView1.PageIndex = 0;
         }
+
     }
 }

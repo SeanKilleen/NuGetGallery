@@ -1,10 +1,11 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 using System.Web.Mvc;
 using NuGetGallery.Areas.Admin.Controllers;
 using Xunit;
@@ -21,7 +22,7 @@ namespace NuGetGallery
             var failingTypes = (from t in TypesInTheSameNamespaceAs(typeof(AdminControllerBase))
                                 where t.GetInterfaces().Contains(typeof(IController))
                                 let a = t.GetCustomAttribute<AuthorizeAttribute>(inherit: true)
-                                where a == null || !String.Equals(a.Roles, Constants.AdminRoleName)
+                                where a == null || !String.Equals(a.Roles, CoreConstants.AdminRoleName)
                                 select t)
                                .ToList();
 

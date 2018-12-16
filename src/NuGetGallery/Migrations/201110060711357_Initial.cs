@@ -1,3 +1,5 @@
+// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 using System.Data.Entity.Migrations;
 
 namespace NuGetGallery.Migrations
@@ -151,16 +153,16 @@ namespace NuGetGallery.Migrations
 
         public override void Down()
         {
-            DropForeignKey("PackageRegistrationOwners", "UserKey", "Users", "Key");
-            DropForeignKey("PackageRegistrationOwners", "PackageRegistrationKey", "PackageRegistrations", "Key");
-            DropForeignKey("UserRoles", "RoleKey", "Roles", "Key");
-            DropForeignKey("UserRoles", "UserKey", "Users", "Key");
-            DropForeignKey("PackageDependencies", "PackageKey", "Packages", "Key");
-            DropForeignKey("PackageAuthors", "PackageKey", "Packages", "Key");
-            DropForeignKey("PackageStatistics", "PackageKey", "Packages", "Key");
-            DropForeignKey("Packages", "PackageRegistrationKey", "PackageRegistrations", "Key");
-            DropForeignKey("EmailMessages", "ToUserKey", "Users", "Key");
-            DropForeignKey("EmailMessages", "FromUserKey", "Users", "Key");
+            DropForeignKey("PackageRegistrationOwners", "UserKey", "Users");
+            DropForeignKey("PackageRegistrationOwners", "PackageRegistrationKey", "PackageRegistrations");
+            DropForeignKey("UserRoles", "RoleKey", "Roles");
+            DropForeignKey("UserRoles", "UserKey", "Users");
+            DropForeignKey("PackageDependencies", "PackageKey", "Packages");
+            DropForeignKey("PackageAuthors", "PackageKey", "Packages");
+            DropForeignKey("PackageStatistics", "PackageKey", "Packages");
+            DropForeignKey("Packages", "PackageRegistrationKey", "PackageRegistrations");
+            DropForeignKey("EmailMessages", "ToUserKey", "Users");
+            DropForeignKey("EmailMessages", "FromUserKey", "Users");
             DropTable("PackageRegistrationOwners");
             DropTable("UserRoles");
             DropTable("PackageDependencies");

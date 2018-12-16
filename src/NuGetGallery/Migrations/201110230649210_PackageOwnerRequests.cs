@@ -1,3 +1,5 @@
+// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 using System.Data.Entity.Migrations;
 
 namespace NuGetGallery.Migrations
@@ -25,9 +27,9 @@ namespace NuGetGallery.Migrations
 
         public override void Down()
         {
-            DropForeignKey("PackageOwnerRequests", "PackageRegistrationKey", "PackageRegistrations", "Key");
-            DropForeignKey("PackageOwnerRequests", "RequestingOwnerKey", "Users", "Key");
-            DropForeignKey("PackageOwnerRequests", "NewOwnerKey", "Users", "Key");
+            DropForeignKey("PackageOwnerRequests", "PackageRegistrationKey", "PackageRegistrations");
+            DropForeignKey("PackageOwnerRequests", "RequestingOwnerKey", "Users");
+            DropForeignKey("PackageOwnerRequests", "NewOwnerKey", "Users");
             DropTable("PackageOwnerRequests");
         }
     }

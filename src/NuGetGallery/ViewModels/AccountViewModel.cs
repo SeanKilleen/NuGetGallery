@@ -1,58 +1,41 @@
-﻿using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using NuGetGallery.Authentication.Providers;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
-    public class AccountViewModel
+    public abstract class AccountViewModel<T> : AccountViewModel where T : User
     {
-        public IEnumerable<string> CuratedFeeds { get; set; }
-        public IList<CredentialViewModel> Credentials { get; set; }
-        public ChangePasswordViewModel ChangePassword { get; set; }
+        public T Account { get; set; }
+
+        public bool IsCertificatesUIEnabled { get; set; }
+
+        public override User User => Account;
+    }
+
+    public abstract class AccountViewModel
+    {
+        public virtual User User { get; }
+
+        public bool IsOrganization => User is Organization;
+
+        public string AccountName { get; set; }
+
+        public bool CanManage { get; set; }
+
+        public bool WasMultiFactorAuthenticated { get; set; }
+
         public ChangeEmailViewModel ChangeEmail { get; set; }
-    }
 
-    public class ChangeEmailViewModel
-    {
-        [Required]
-        [StringLength(255)]
-        [Display(Name = "New Email Address")]
-        //[DataType(DataType.EmailAddress)] - does not work with client side validation
-        [RegularExpression(RegisterViewModel.EmailValidationRegex, ErrorMessage = RegisterViewModel.EmailValidationErrorMessage)]
-        public string NewEmail { get; set; }
+        public ChangeNotificationsViewModel ChangeNotifications { get; set; }
 
-        [Required]
-        [DataType(DataType.Password)]
-        [Display(Name = "Current Password (for verification)")]
-        [StringLength(64)]
-        public string Password { get; set; }
-    }
+        public bool HasPassword { get; set; }
 
-    public class ChangePasswordViewModel
-    {
-        [Required]
-        [Display(Name = "Old Password")]
-        public string OldPassword { get; set; }
+        public string CurrentEmailAddress { get; set; }
 
-        [Required]
-        [Display(Name = "New Password")]
-        public string NewPassword { get; set; }
-    }
+        public bool HasUnconfirmedEmailAddress { get; set; }
 
-    public class CredentialViewModel
-    {
-        public string Type { get; set; }
-        public string TypeCaption { get; set; }
-        public string Identity { get; set; }
-        public string Value { get; set; }
-        public CredentialKind Kind { get; set; }
-        public AuthenticatorUI AuthUI { get; set; }
-    }
-
-    public enum CredentialKind
-    {
-        Password,
-        Token,
-        External
+        public bool HasConfirmedEmailAddress { get; set; }
     }
 }

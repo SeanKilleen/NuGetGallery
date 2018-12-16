@@ -60,6 +60,7 @@ h4 {
 
 h5 {
     font-size: 1.1em;
+    font-weight: 500;
 }
 
 h6 {
@@ -72,10 +73,10 @@ small {
 }
 
 
-    h1 img, h2 img, h3 img,
-    h4 img, h5 img, h6 img {
-        margin: 0;
-    }
+h1 img, h2 img, h3 img,
+h4 img, h5 img, h6 img {
+    margin: 0;
+}
 
 /* Page Headings*/
 
@@ -144,6 +145,7 @@ a {
     color: #0071bc;
     outline: none;
     text-decoration: none;
+    cursor: pointer;
 }
 
     a:hover {
@@ -152,6 +154,10 @@ a {
 
     a img {
         border: none;
+    }
+
+    a:focus {
+        outline: auto;
     }
 
 blockquote {
@@ -204,6 +210,10 @@ nav, section {
     display: block;
 }
 
+th {
+    text-align: left;
+}
+
 /* General */
 
 .message {
@@ -224,6 +234,14 @@ nav, section {
     background-color: #fff7c4;
     color: #ff9600;
 }
+
+    .warning.fancy {
+        color: black;
+        border-color: #f7d3a5;
+        font-size: 1em;
+        font-weight: 500;
+        padding: 5px;
+    }
 
 /* Logo */
 
@@ -334,16 +352,16 @@ p.authors {
 }
 
 .stat-number {
-    font: 2.3em 'andale mono', 'lucida console', monospace;
+    font: 2em 'andale mono', 'lucida console', monospace;
     letter-spacing: 1px;
     line-height: 1.4em;
     margin: 0;
 }
 
 .stat-label {
-    font-size: 1.25em;
+    font-size: 1.0em;
     line-height: 1em;
-    margin: -7px 0 0 5px;
+    margin: -7px 0 0 0px;
 }
 
 /* License Gadget */
@@ -436,6 +454,10 @@ p.authors {
 
 /* List Packages Page */
 
+.smaller {
+    font-size: 0.85em;
+}
+
 .search h1 {
     font-size: 2.3em;
     margin: 0;
@@ -487,7 +509,17 @@ section.package {
         overflow: hidden;
     }
 
-    section.package div.minimum-client-version {
+    section.package article > :first-child {
+        font-style: italic;
+    }
+
+        section.package article > :first-child small:last-child {
+            padding-left: 10px;
+            margin-left: 10px;
+            border-left: 1px solid #ccc;
+        }
+
+    section.package article > .minimum-client-version {
         float: right;
     }
 
@@ -605,69 +637,82 @@ ul.pager {
     font-size: 1.1em;
 }
 
-    /* header */
+.sexy-table-full {
+    width: 100%;
+}
 
-    .sexy-table thead tr {
-        border-bottom: solid 1px #333;
+    .sexy-table-full .last {
+        text-align: right;
+        padding: 5px 15px 5px 0;
     }
 
-    .sexy-table th {
-        font-size: 1.25em;
-        font-weight: normal;
-        padding: 5px 15px 0px 0px;
-        text-align: left;
+/* header */
+
+.sexy-table thead tr {
+    border-bottom: solid 1px #333;
+}
+
+.sexy-table th {
+    font-size: 1.25em;
+    font-weight: normal;
+    padding: 5px 15px 0px 0px;
+    text-align: left;
+}
+
+    /* actions */
+
+    .sexy-table th.actions {
+        text-indent: -9999px;
     }
 
-        /* actions */
+.sexy-table td.actions {
+    width: 32px;
+}
 
-        .sexy-table th.actions {
-            text-indent: -9999px;
-        }
-
-    .sexy-table td.actions {
-        width: 32px;
+    .sexy-table td.actions a.table-action-link {
+        text-decoration: none;
     }
 
-        .sexy-table td.actions a.table-action-link {
-            text-decoration: none;
-        }
+/* body */
 
-    /* body */
+.sexy-table tbody tr {
+    margin-bottom: 10px;
+}
 
-    .sexy-table tbody tr {
-        margin-bottom: 10px;
+    .sexy-table tbody tr:hover {
+        background-color: #f4f5f6;
     }
 
-        .sexy-table tbody tr:hover {
-            background-color: #f4f5f6;
-        }
-
-        .sexy-table tbody tr.recommended {
-            font-weight: 800;
-        }
-
-    .sexy-table tbody td {
-        padding: 5px 25px 5px 0;
+    .sexy-table tbody tr.recommended {
+        font-weight: 800;
     }
 
-        .sexy-table tbody td.actions {
-            padding: 2px 5px;
-        }
+.sexy-table tbody td {
+    padding: 5px 25px 5px 0;
+}
 
-    /* footer */
-
-    .sexy-table tfoot {
-        border-bottom: solid 1px #333;
-        font-weight: 600;
+    .sexy-table tbody td.actions {
+        padding: 2px 5px;
     }
 
-        .sexy-table tfoot td {
-            padding: 3px 0;
-        }
+    .sexy-table tbody td.package-version-downloads {
+        text-align: right
+    }
 
-        .sexy-table tfoot tr {
-            border-top: 2px solid #333;
-        }
+/* footer */
+
+.sexy-table tfoot {
+    border-bottom: solid 1px #333;
+    font-weight: 600;
+}
+
+    .sexy-table tfoot td {
+        padding: 3px 0;
+    }
+
+    .sexy-table tfoot tr {
+        border-top: 2px solid #333;
+    }
 
 
 /* Pivot Table */
@@ -772,24 +817,12 @@ ul.pager {
 }
 
 .statistics-total-div {
-    height: 100px;
-    width: 200px;
-}
-
-.statistics-total {
-    font-weight: bold;
-    font-size: 1.5em;
-    position: relative;
-    top: 30px;
-    left: 60px;
+    padding-bottom: 10px;
+    padding-top: 10px;
 }
 
 .statistics-rank {
     font-size: 0.8em;
-}
-
-.statistics-pivot {
-    float: left;
 }
 
 .statistics-sidebar {
@@ -798,15 +831,15 @@ ul.pager {
     height: 300px;
     font-size: 1.25em;
     font-weight: normal;
-    padding: 5px 10px 0px 0px;
+    padding: 5px 10px 0 0;
 }
 
-.statistics-data {
-    float: left;
+.statistics-pivot {
+    padding-top: 25px;
 }
 
 .statistics-graph {
-    float: left;
+    width: 100%;
 }
 
 .statistics-dimensions-table {
@@ -818,6 +851,10 @@ ul.pager {
 .axis line {
     fill: none;
     stroke: #000;
+    -webkit-shape-rendering: crispEdges;
+    -moz-shape-rendering: crispEdges;
+    -ms-shape-rendering: crispEdges;
+    -o-shape-rendering: crispEdges;
     shape-rendering: crispEdges;
 }
 
@@ -873,6 +910,12 @@ fieldset.form {
     color: #52a4ca;
 }
 
+.form-field h4 {
+    color: #52a4ca;
+    font-size: 1.3em;
+    margin-bottom: 5px;
+}
+
 .form-field {
     margin-bottom: 10px;
     position: relative;
@@ -884,6 +927,17 @@ fieldset.form {
         font-size: 1.25em;
         margin-bottom: 5px;
     }
+
+        .form-field label.checkoboxsmall {
+            color: #333;
+            font-size: 100%;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+            .form-field label.checkoboxsmall.inline {
+                display: inline-block;
+            }
 
         .form-field label.checkbox {
             display: inline;
@@ -906,10 +960,16 @@ fieldset.form {
         -moz-box-sizing: border-box;
         -webkit-box-sizing: border-box;
         box-sizing: border-box;
+        height: 2.25em;
     }
 
-    .form-field.form-field-full input {
+    .form-field.form-field-full input,
+    .form-field.form-field-full textarea {
         width: 100%;
+    }
+
+    .form-field.form-field-full textarea {
+        height: 96px;
     }
 
     .form-field input[data-val-required],
@@ -927,15 +987,28 @@ fieldset.form {
         border-left: none;
     }
 
+        .form-field input[type="checkbox"]:focus,
+        .form-field input[type="radio"]:focus,
+        .form-field input[type="file"]:focus {
+            outline: auto !important;
+        }
+
     .form-field input[type="url"] {
         width: 100%;
     }
 
     .form-field select {
+        background: #fff url("../content/images/inputBackground.png") repeat-x;
+        border: solid 1px #ccc;
         color: #7f8c7d;
         font-size: 1.25em;
-        padding: 2px;
-        margin: 0px 0px 10px 0;
+        padding: 5px 5px 5px 10px;
+        vertical-align: middle;
+        /* This won't work in IE7, but it will only produce a minor layout quirk */
+        -moz-box-sizing: border-box;
+        -webkit-box-sizing: border-box;
+        box-sizing: border-box;
+        height: 2.25em;
     }
 
         .form-field select[data-edited=true] {
@@ -997,6 +1070,15 @@ fieldset.form {
     z-index: 550;
 }
 
+.form-field-full > .field-validation-error,
+.form-field-full > .field-hint-message {
+    width: 98.5%;
+    padding-top: 5px;
+    padding-left: 5px;
+    padding-bottom: 5px;
+    padding-right: 0px;
+}
+
 textarea + .field-validation-error {
     top: auto;
     left: auto;
@@ -1050,6 +1132,26 @@ a.btn {
     display: inline-block;
 }
 
+.btn.btn-veryflat {
+    display: inline-block;
+    background: none !important;
+    border: none;
+    padding: 2px !important;
+    font: inherit;
+    cursor: pointer;
+    color: #0071bc;
+    text-decoration: none;
+    box-shadow: none;
+}
+
+    .btn.btn-veryflat:hover {
+        text-decoration: underline;
+    }
+
+    .btn.btn-veryflat:focus {
+        outline: auto;
+    }
+
 a:hover.btn {
     color: white;
     text-decoration: none;
@@ -1082,6 +1184,8 @@ button, input[type="submit"], .btn {
         border-color: #307A25;
     }
 
+
+
 .form a.cancel {
     font-size: 1.25em;
 }
@@ -1093,6 +1197,10 @@ button, input[type="submit"], .btn {
 .form img {
     display: block;
     margin: 15px 0;
+}
+
+.form input[type="submit"]:focus {
+    outline: auto;
 }
 
 .validation-summary-errors,
@@ -1108,17 +1216,6 @@ button, input[type="submit"], .btn {
     .validation-summary-errors li {
         list-style: none;
     }
-
-.PoliteCaptcha.editor-field .field-validation-error {
-    position: static;
-    width: 300px;
-}
-
-/* To fix alignment of generated reCAPTCHA table */
-
-.PoliteCaptcha.editor-field table {
-    margin-left: -3px !important;
-}
 
 .clear-fix {
     clear: both;
@@ -1178,6 +1275,10 @@ button, input[type="submit"], .btn {
     padding: 0.25em;
 }
 
+    .btn.btn-big:focus {
+        outline: auto;
+    }
+
 .verticalSeparator {
     display: inline-block;
     vertical-align: middle;
@@ -1211,7 +1312,7 @@ ul.actionlist {
             padding: 0.5em;
             color: black;
             float: left;
-            height: 100px;
+            height: 120px;
         }
 
             ul.actionlist li.actionlist-item a.actionlist-item-link:hover {
@@ -1234,12 +1335,12 @@ ul.actionlist {
                 text-decoration: none;
             }
 
-ul.accordian {
+ul.accordion {
     margin: 0;
     padding: 5px;
 }
 
-    ul.accordian li.accordian-item {
+    ul.accordion li.accordion-item {
         background-color: #eff7fa;
         margin: 0.5em 0;
         padding: 0.5em;
@@ -1249,43 +1350,90 @@ ul.accordian {
         min-height: 32px;
     }
 
-        ul.accordian li.accordian-item .accordian-item-actions {
+        ul.accordion li.accordion-item .accordion-item-actions {
             float: right;
             margin-top: 3px;
         }
 
-        ul.accordian li.accordian-item .accordian-item-title {
+        ul.accordion li.accordion-item .accordion-item-title {
             font-size: 16pt;
             margin-bottom: 1em;
         }
 
-        ul.accordian li.accordian-item .accordian-item-subtitle {
+        ul.accordion li.accordion-item .accordion-item-subtitle {
             font-size: 12pt;
             margin-left: 1em;
         }
 
-            ul.accordian li.accordian-item .accordian-item-subtitle .owner-image {
+            ul.accordion li.accordion-item .accordion-item-subtitle .owner-image {
                 margin-bottom: -8px;
             }
 
-        ul.accordian li.accordian-item .accordian-item-content {
+        ul.accordion li.accordion-item .accordion-item-content {
             padding-top: 1em;
         }
 
-        ul.accordian li.accordian-item .accordian-expand-link {
-            display: inline-block;
+        ul.accordion li.accordion-item .accordion-expand-link {
+            background: none!important;
+            border: none;
+            padding: 0!important;
+            cursor: pointer;
             margin-top: 0.25em;
+            margin-left: 3px;
+            color: #0071bc;
+            box-shadow: none;
+            font-size:0.85em;
         }
 
-        ul.accordian li.accordian-item.accordian-item-disabled {
+        ul.accordion li.accordion-item .accordion-expand-link:hover {
+            text-decoration: underline;
+        }
+
+        ul.accordion li.accordion-item.accordion-item-disabled {
             background-color: white;
             border: 1px dashed silver;
             box-shadow: none;
         }
 
-            ul.accordian li.accordian-item.accordian-item-disabled .accordian-item-title, li.accordian-item-disabled .accordian-item-subtitle {
+            ul.accordion li.accordion-item.accordion-item-disabled .accordion-item-title, li.accordion-item-disabled .accordion-item-subtitle {
                 font-style: italic;
             }
+
+    ul.accordion.enhanced {
+        margin: 0;
+        padding: 0px;
+    }
+
+        ul.accordion.enhanced li.accordion-item {
+            border: none;
+            box-shadow: none;
+            margin: 0px;
+            padding: 0;
+        }
+
+            ul.accordion.enhanced li.accordion-item .accordion-item-header {
+                background-color: #3a6e8b;
+                color: white;
+                padding: 0.5em;
+                list-style-type: none;
+                min-height: 32px;
+            }
+
+            ul.accordion.enhanced li.accordion-item .accordion-item-content {
+                background-color: white;
+            }
+
+        ul.accordion.enhanced .accordion-expand-button {
+            font-weight: 400;
+            font-size: 1.1em;
+            padding: 5px 15px 5px 15px;
+        }
+
+        ul.accordion.enhanced button {
+            font-weight: 400;
+            font-size: 1.1em;
+            padding: 5px 15px 5px 15px;
+        }
 
 /* Script-related Classes */
 .s-hidden {
@@ -1343,4 +1491,238 @@ li.contributors-contributor {
 img.contributors-contributor-avatar {
     width: 64px;
     height: 64px;
+}
+
+/* Danger zone */
+.danger-zone h1, .danger-zone h2, .danger-zone h3 {
+    color: #c13a3f;
+}
+
+.danger-zone label {
+    color: black;
+}
+
+.danger-zone input[data-val-required], .danger-zone textarea[data-val-required] {
+    border-left: solid 5px #c13a3f;
+}
+
+.danger-zone button, .danger-zone input[type="submit"], .danger-zone .btn {
+    background-image: none;
+    background-color: #c13a3f;
+    color: white;
+    border: solid 1px #c13a3f;
+}
+
+    .danger-zone button:hover, .danger-zone input[type="submit"]:hover, .danger-zone .btn:hover {
+        background-image: none;
+        background-color: #7F0000;
+        color: white;
+        border: solid 1px #7F0000;
+    }
+
+/* Details table*/
+.details-table {
+    table-layout: fixed;
+    border-spacing: 0px;
+}
+
+    .details-table tbody {
+        background-color: white;
+    }
+
+    .details-table td {
+        border-top: 1px solid #ccc;
+        border-collapse: collapse;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        padding-left: 10px;
+        vertical-align: top;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .details-table tr:last-child td {
+        border-bottom: 1px solid #ccc;
+    }
+
+    .details-table b {
+        font-weight: 600;
+        color: #333;
+    }
+
+    .details-table .longlist {
+        list-style-position: inside;
+        list-style-type: none;
+        padding-left: 10px;
+    }
+
+        .details-table .longlist li {
+            display: none;
+        }
+
+        .details-table .longlist ul {
+            list-style-position: inside;
+            list-style-type: none;
+        }
+
+    .details-table .hidden {
+        display: none;
+    }
+
+    .details-table td.actions {
+        text-align: right;
+        padding-right: 10px;
+    }
+
+    .details-table span {
+        color: #555
+    }
+
+        .details-table span.expired {
+            font-weight: 600;
+        }
+
+    .details-table tr:first-child td {
+        border-top-width: 0px;
+    }
+
+    /* Table inside table scenario */
+    .details-table table td {
+        border-top: 0px solid #ccc;
+        border-collapse: collapse;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        padding-left: 10px;
+        vertical-align: top;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .details-table tr:last-child td {
+        border-bottom: 0px solid #ccc;
+    }
+
+
+/* divs*/
+
+.scrollable-div {
+    overflow-x: hidden;
+    overflow-y: scroll;
+    background-color: white;
+    width: 100%;
+    border: 1px solid #ccc;
+}
+
+.disabled-div {
+    pointer-events: none;
+    opacity: 0.4;
+}
+
+/* popup */
+
+.popup {
+    position: relative;
+    display: inline-block;
+    padding: 5px;
+}
+
+    /* The actual popup (appears on top) */
+    .popup .popupbox {
+        text-align: left;
+        position: absolute;
+        z-index: 1;
+        top: 125%;
+        left: 50%;
+        border: 1px solid #ccc;
+        opacity: 0.97;
+    }
+
+    .popup .innertext {
+        padding: 18px 0px 10px 10px;
+        white-space: normal;
+    }
+
+    /* Popup arrow */
+    .popup .popupbox::after,
+    .popup .popupbox::before {
+        content: "";
+        position: absolute;
+        bottom: 100%;
+        margin-left: -5px;
+        border-style: solid;
+    }
+
+    /* this border color controlls the color of the triangle (what looks like the fill of the triangle) */
+    .popup .popupbox::after {
+        border-color: transparent transparent white transparent;
+        border-width: 7px;
+        left: 100px;
+    }
+
+    /* this border color controlls the outside, thin border */
+    .popup .popupbox::before {
+        border-color: transparent transparent #ccc transparent;
+        border-width: 8px;
+        left: 99px;
+    }
+
+    .popup table td,
+    .popup table th {
+        padding: 5px 10px 1px 0px;
+    }
+
+        .popup table td + td,
+        .popup table th + th {
+            padding-left: 10px;
+        }
+
+    .popup a.boxclose {
+        margin: -5px 5px;
+        float: right;
+        cursor: pointer;
+        color: #ccc;
+        font-size: 15px;
+        display: inline-block;
+        line-height: 0px;
+        padding: 8px 0px 0px 0px;
+    }
+
+    /* small popup*/
+    .popup .innertext.small {
+        padding: 5px 5px 5px 5px;
+        font-size: 0.9em;
+    }
+
+    .popup .popupbox.small::before {
+        left: 19px;
+        border-width: 6px;
+    }
+
+    .popup .popupbox.small::after {
+        left: 20px;
+        border-width: 5px;
+    }
+
+    .popup .popupbox.small {
+        border-radius: 3px;
+    }
+
+/* warning sign */
+
+.warningsign i.icon-stack-base {
+    color: #ffcc00;
+    font-size: 1.3em;
+}
+
+.warningsign i.icon-exclamation {
+    color: black;
+    font-size: 0.9em;
+}
+
+.slimbutton {
+    font-weight: 400;
+    font-size: 1.1em;
+    padding: 5px 15px 5px 15px;
 }

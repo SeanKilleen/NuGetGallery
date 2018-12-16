@@ -1,32 +1,33 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Linq;
 using System.Net;
-using System.Net.Http;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web;
 using Newtonsoft.Json.Linq;
+using NuGet.Services.Entities;
 using NuGet.Services.Search.Client;
-using NuGet.Services.Search.Models;
+using NuGet.Services.Search.Client.Correlation;
 using NuGetGallery.Configuration;
 using NuGetGallery.Diagnostics;
-using NuGetGallery.Infrastructure;
 
 namespace NuGetGallery.Infrastructure.Lucene
 {
     public class ExternalSearchService : ISearchService, IIndexingService, IRawSearchService
     {
         public static readonly string SearchRoundtripTimePerfCounter = "SearchRoundtripTime";
-        
-        private SearchClient _client;
+
+        private static IEndpointHealthIndicatorStore _healthIndicatorStore;
+        private static SearchClient _client;
+
         private JObject _diagCache;
-        
+
         public Uri ServiceUri { get; private set; }
-        
+
         protected IDiagnosticsSource Trace { get; private set; }
 
         public string IndexPath
@@ -41,9 +42,31 @@ namespace NuGetGallery.Infrastructure.Lucene
 
         public bool ContainsAllVersions { get { return true; } }
 
+        public ExternalSearchService()
+        {
+            // used for testing
+            if (_healthIndicatorStore == null)
+            {
+                _healthIndicatorStore = new BaseUrlHealthIndicatorStore(new NullHealthIndicatorLogger());
+            }
+
+            if (_client == null)
+            {
+                _client = new SearchClient(
+                    ServiceUri, 
+                    "SearchGalleryQueryService/3.0.0-rc", 
+                    null, 
+                    _healthIndicatorStore, 
+                    QuietLog.LogHandledException, 
+                    new TracingHttpHandler(Trace), 
+                    new CorrelatingHttpClientHandler());
+            }
+        }
+
         public ExternalSearchService(IAppConfiguration config, IDiagnosticsService diagnostics)
         {
-            ServiceUri = config.SearchServiceUri;
+            ServiceUri = config.ServiceDiscoveryUri;
+
             Trace = diagnostics.SafeGetSource("ExternalSearchService");
 
             // Extract credentials
@@ -66,22 +89,37 @@ namespace NuGetGallery.Infrastructure.Lucene
                 }.Uri;
             }
 
-            _client = new SearchClient(ServiceUri, credentials, new TracingHttpHandler(Trace));
+            // note: intentionally not locking the next two assignments to avoid blocking calls
+            if (_healthIndicatorStore == null)
+            {
+                _healthIndicatorStore = new BaseUrlHealthIndicatorStore(new AppInsightsHealthIndicatorLogger());
+            }
+
+            if (_client == null)
+            {
+                _client = new SearchClient(
+                    ServiceUri, 
+                    config.SearchServiceResourceType, 
+                    credentials, 
+                    _healthIndicatorStore,
+                    QuietLog.LogHandledException,
+                    new TracingHttpHandler(Trace), 
+                    new CorrelatingHttpClientHandler());
+            }
         }
 
         private static readonly Task<bool> _exists = Task.FromResult(true);
-        [SuppressMessage("Microsoft.Performance", "CA1822:MarkMembersAsStatic", Justification="This method is implementing an interface")]
         public Task<bool> Exists()
         {
             return _exists;
         }
 
-        public Task<SearchResults> RawSearch(SearchFilter filter)
+        public virtual Task<SearchResults> RawSearch(SearchFilter filter)
         {
             return SearchCore(filter, raw: true);
         }
 
-        public Task<SearchResults> Search(SearchFilter filter)
+        public virtual Task<SearchResults> Search(SearchFilter filter)
         {
             return SearchCore(filter, raw: false);
         }
@@ -95,7 +133,6 @@ namespace NuGetGallery.Infrastructure.Lucene
                 filter.SearchTerm,
                 projectTypeFilter: null,
                 includePrerelease: filter.IncludePrerelease,
-                curatedFeed: filter.CuratedFeed == null ? null : filter.CuratedFeed.Name,
                 sortBy: filter.SortOrder,
                 skip: filter.Skip,
                 take: filter.Take,
@@ -103,14 +140,19 @@ namespace NuGetGallery.Infrastructure.Lucene
                 countOnly: filter.CountOnly,
                 explain: false,
                 getAllVersions: filter.IncludeAllVersions,
-                supportedFramework: filter.SupportedFramework);
-			sw.Stop();
+                supportedFramework: filter.SupportedFramework,
+                semVerLevel: filter.SemVerLevel);
+            sw.Stop();
 
             SearchResults results = null;
             if (result.IsSuccessStatusCode)
             {
                 var content = await result.ReadContent();
-                if (filter.CountOnly || content.TotalHits == 0)
+                if (content == null)
+                {
+                    results = new SearchResults(0, null, Enumerable.Empty<Package>().AsQueryable());
+                } 
+                else if (filter.CountOnly || content.TotalHits == 0)
                 {
                     results = new SearchResults(content.TotalHits, content.IndexTimestamp);
                 }
@@ -119,8 +161,17 @@ namespace NuGetGallery.Infrastructure.Lucene
                     results = new SearchResults(
                         content.TotalHits,
                         content.IndexTimestamp,
-                        content.Data.Select(ReadPackage).AsQueryable());
+                        content.Data.Select(x => ReadPackage(x, filter.SemVerLevel)).AsQueryable());
                 }
+            }
+            else
+            {
+                if (result.HttpResponse.Content != null)
+                {
+                    result.HttpResponse.Content.Dispose();
+                }
+
+                results = new SearchResults(0, null, Enumerable.Empty<Package>().AsQueryable());
             }
 
             Trace.PerfEvent(
@@ -133,11 +184,9 @@ namespace NuGetGallery.Infrastructure.Lucene
                     {"Hits", results == null ? -1 : results.Hits},
                     {"StatusCode", (int)result.StatusCode},
                     {"SortOrder", filter.SortOrder.ToString()},
-                    {"CuratedFeed", filter.CuratedFeed == null ? null : filter.CuratedFeed.Name},
                     {"Url", TryGetUrl()}
                 });
 
-            result.HttpResponse.EnsureSuccessStatusCode();
             return results;
         }
 
@@ -202,7 +251,7 @@ namespace NuGetGallery.Infrastructure.Lucene
             }
         }
 
-        private static Package ReadPackage(JObject doc)
+        internal static Package ReadPackage(JObject doc, string semVerLevel)
         {
             var dependencies =
                 doc.Value<JArray>("Dependencies")
@@ -215,7 +264,7 @@ namespace NuGetGallery.Infrastructure.Lucene
                     })
                    .ToArray();
 
-            var frameworks = 
+            var frameworks =
                 doc.Value<JArray>("SupportedFrameworks")
                    .Select(v => new PackageFramework() { TargetFramework = v.Value<string>() })
                    .ToArray();
@@ -229,9 +278,14 @@ namespace NuGetGallery.Infrastructure.Lucene
                        .Select(v => new User { Username = v.Value<string>() })
                        .ToArray(),
                     DownloadCount = reg.Value<int>("DownloadCount"),
+                    IsVerified = reg.Value<bool>("Verified"),
                     Key = reg.Value<int>("Key")
                 };
             }
+
+            var isLatest = doc.Value<bool>("IsLatest");
+            var isLatestStable = doc.Value<bool>("IsLatestStable");
+            var semVer2 = SemVerLevelKey.ForSemVerLevel(semVerLevel) == SemVerLevelKey.SemVer2;
 
             return new Package
             {
@@ -245,14 +299,16 @@ namespace NuGetGallery.Infrastructure.Lucene
                 Hash = doc.Value<string>("Hash"),
                 HashAlgorithm = doc.Value<string>("HashAlgorithm"),
                 IconUrl = doc.Value<string>("IconUrl"),
-                IsLatest = doc.Value<bool>("IsLatest"),
-                IsLatestStable = doc.Value<bool>("IsLatestStable"),
+                IsLatest = isLatest,
+                IsLatestStable = isLatestStable,
+                IsLatestSemVer2 = semVer2 ? isLatest : false,
+                IsLatestStableSemVer2 = semVer2 ? isLatestStable : false,
                 Key = doc.Value<int>("Key"),
                 Language = doc.Value<string>("Language"),
                 LastUpdated = doc.Value<DateTime>("LastUpdated"),
                 LastEdited = doc.Value<DateTime?>("LastEdited"),
                 PackageRegistration = registration,
-                PackageRegistrationKey = registration == null ? 0 : registration.Key,
+                PackageRegistrationKey = registration?.Key ?? 0,
                 PackageFileSize = doc.Value<long>("PackageFileSize"),
                 ProjectUrl = doc.Value<string>("ProjectUrl"),
                 Published = doc.Value<DateTime>("Published"),
@@ -268,7 +324,8 @@ namespace NuGetGallery.Infrastructure.Lucene
                 LicenseUrl = doc.Value<string>("LicenseUrl"),
                 LicenseNames = doc.Value<string>("LicenseNames"),
                 LicenseReportUrl = doc.Value<string>("LicenseReportUrl"),
-                HideLicenseReport = doc.Value<bool>("HideLicenseReport")
+                HideLicenseReport = doc.Value<bool>("HideLicenseReport"),
+                Listed = doc.Value<bool>("Listed")
             };
         }
 

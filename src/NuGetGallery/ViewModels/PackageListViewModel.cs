@@ -1,7 +1,11 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web.Mvc;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
@@ -9,26 +13,17 @@ namespace NuGetGallery
     {
         public PackageListViewModel(
             IQueryable<Package> packages,
-            DateTime? indexTimestampUtc,
-            string searchTerm,
-            int totalCount,
-            int pageIndex,
-            int pageSize,
-            UrlHelper url)
-            : this(packages, indexTimestampUtc, searchTerm, totalCount, pageIndex, pageSize, url, curatedFeed: null) { }
-
-        public PackageListViewModel(
-            IQueryable<Package> packages,
+            User currentUser,
             DateTime? indexTimestampUtc,
             string searchTerm,
             int totalCount,
             int pageIndex,
             int pageSize,
             UrlHelper url,
-            string curatedFeed)
+            bool includePrerelease)
         {
             // TODO: Implement actual sorting
-            IEnumerable<ListPackageItemViewModel> items = packages.ToList().Select(pv => new ListPackageItemViewModel(pv));
+            IEnumerable<ListPackageItemViewModel> items = packages.ToList().Select(pv => new ListPackageItemViewModel(pv, currentUser));
             PageIndex = pageIndex;
             IndexTimestampUtc = indexTimestampUtc;
             PageSize = pageSize;
@@ -40,32 +35,32 @@ namespace NuGetGallery
                 items,
                 PageIndex,
                 pageCount,
-                page => curatedFeed == null ?
-                    url.PackageList(page, searchTerm) :
-                    url.CuratedPackageList(page, searchTerm, curatedFeed)
-                );
+                page => url.PackageList(page, searchTerm, includePrerelease));
             Items = pager.Items;
             FirstResultIndex = 1 + (PageIndex * PageSize);
             LastResultIndex = FirstResultIndex + Items.Count() - 1;
             Pager = pager;
+            IncludePrerelease = includePrerelease;
         }
 
-        public int FirstResultIndex { get; set; }
+        public int FirstResultIndex { get; }
 
-        public IEnumerable<ListPackageItemViewModel> Items { get; private set; }
+        public IEnumerable<ListPackageItemViewModel> Items { get; }
 
-        public int LastResultIndex { get; set; }
+        public int LastResultIndex { get; }
 
-        public IPreviousNextPager Pager { get; private set; }
+        public IPreviousNextPager Pager { get; }
 
-        public int TotalCount { get; private set; }
+        public int TotalCount { get; }
 
-        public string SearchTerm { get; private set; }
+        public string SearchTerm { get;  }
 
-        public int PageIndex { get; private set; }
+        public int PageIndex { get; }
 
-        public int PageSize { get; private set; }
+        public int PageSize { get; }
 
-        public DateTime? IndexTimestampUtc { get; private set; }
+        public DateTime? IndexTimestampUtc { get; }
+
+        public bool IncludePrerelease { get; }
     }
 }

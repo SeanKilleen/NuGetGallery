@@ -1,109 +1,104 @@
-﻿using System;
-using System.Globalization;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using System.Web.Mvc;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
-    public class PackageFileService : IPackageFileService
+    public class PackageFileService : CorePackageFileService, IPackageFileService
     {
+        /// <summary>
+        /// Active readme markdown file, formatted as 'active/{packageId}/{version}.md'
+        /// </summary>
+        private const string ReadMeFilePathTemplateActive = "active/{0}/{1}{2}";
+
         private readonly IFileStorageService _fileStorageService;
 
         public PackageFileService(IFileStorageService fileStorageService)
+            : base(fileStorageService, new PackageFileMetadataService())
         {
             _fileStorageService = fileStorageService;
         }
 
         public Task<ActionResult> CreateDownloadPackageActionResultAsync(Uri requestUrl, Package package)
         {
-            var fileName = BuildFileName(package);
-            return _fileStorageService.CreateDownloadFileActionResultAsync(requestUrl, Constants.PackagesFolderName, fileName);
+            var fileName = FileNameHelper.BuildFileName(package, CoreConstants.PackageFileSavePathTemplate, CoreConstants.NuGetPackageFileExtension);
+            return _fileStorageService.CreateDownloadFileActionResultAsync(requestUrl, CoreConstants.Folders.PackagesFolderName, fileName);
         }
 
         public Task<ActionResult> CreateDownloadPackageActionResultAsync(Uri requestUrl, string id, string version)
         {
-            var fileName = BuildFileName(id, version);
-            return _fileStorageService.CreateDownloadFileActionResultAsync(requestUrl, Constants.PackagesFolderName, fileName);
+            var fileName = FileNameHelper.BuildFileName(id, version, CoreConstants.PackageFileSavePathTemplate, CoreConstants.NuGetPackageFileExtension);
+            return _fileStorageService.CreateDownloadFileActionResultAsync(requestUrl, CoreConstants.Folders.PackagesFolderName, fileName);
         }
 
-        public Task DeletePackageFileAsync(string id, string version)
-        {
-            if (String.IsNullOrWhiteSpace(id))
-            {
-                throw new ArgumentNullException("id");
-            }
-
-            if (String.IsNullOrWhiteSpace(version))
-            {
-                throw new ArgumentNullException("version");
-            }
-
-            var fileName = BuildFileName(id, version);
-            return _fileStorageService.DeleteFileAsync(Constants.PackagesFolderName, fileName);
-        }
-
-        public Task SavePackageFileAsync(Package package, Stream packageFile)
-        {
-            if (packageFile == null)
-            {
-                throw new ArgumentNullException("packageFile");
-            }
-
-            var fileName = BuildFileName(package);
-            return _fileStorageService.SaveFileAsync(Constants.PackagesFolderName, fileName, packageFile);
-        }
-
-        public async Task<Stream> DownloadPackageFileAsync(Package package)
-        {
-            var fileName = BuildFileName(package);
-            return (await _fileStorageService.GetFileAsync(Constants.PackagesFolderName, fileName));
-        }
-
-        private static string BuildFileName(string id, string version)
-        {
-            if (id == null)
-            {
-                throw new ArgumentNullException("id");
-            }
-            
-            if (version == null)
-            {
-                throw new ArgumentNullException("version");
-            }
-
-            // Note: packages should be saved and retrieved in blob storage using the lower case version of their filename because
-            // a) package IDs can and did change case over time
-            // b) blob storage is case sensitive
-            // c) we don't want to hit the database just to look up the right case
-            // and remember - version can contain letters too.
-            return String.Format(
-                CultureInfo.InvariantCulture,
-                Constants.PackageFileSavePathTemplate,
-                id.ToLowerInvariant(),
-                version.ToLowerInvariant(),
-                Constants.NuGetPackageFileExtension);
-        }
-
-        private static string BuildFileName(Package package)
+        /// <summary>
+        /// Deletes the package readme.md file from storage.
+        /// </summary>
+        /// <param name="package">The package associated with the readme.</param>
+        public Task DeleteReadMeMdFileAsync(Package package)
         {
             if (package == null)
             {
-                throw new ArgumentNullException("package");
+                throw new ArgumentNullException(nameof(package));
             }
+            
+            var fileName = FileNameHelper.BuildFileName(package, ReadMeFilePathTemplateActive, GalleryConstants.MarkdownFileExtension);
 
-            if (package.PackageRegistration == null || 
-                String.IsNullOrWhiteSpace(package.PackageRegistration.Id) ||
-                (String.IsNullOrWhiteSpace(package.NormalizedVersion) && String.IsNullOrWhiteSpace(package.Version)))
+            return _fileStorageService.DeleteFileAsync(CoreConstants.Folders.PackageReadMesFolderName, fileName);
+        }
+
+        /// <summary>
+        /// Saves the package readme.md file to storage.
+        /// </summary>
+        /// <param name="package">The package associated with the readme.</param>
+        /// <param name="readMeMd">Markdown content.</param>
+        public async Task SaveReadMeMdFileAsync(Package package, string readMeMd)
+        {
+            if (string.IsNullOrWhiteSpace(readMeMd))
             {
-                throw new ArgumentException("The package is missing required data.", "package");
+                throw new ArgumentNullException(nameof(readMeMd));
             }
 
-            return BuildFileName(
-                package.PackageRegistration.Id, 
-                String.IsNullOrEmpty(package.NormalizedVersion) ?
-                    SemanticVersionExtensions.Normalize(package.Version) :
-                    package.NormalizedVersion);
+            var fileName = FileNameHelper.BuildFileName(package, ReadMeFilePathTemplateActive, GalleryConstants.MarkdownFileExtension);
+
+            using (var readMeMdStream = new MemoryStream(Encoding.UTF8.GetBytes(readMeMd)))
+            {
+                await _fileStorageService.SaveFileAsync(CoreConstants.Folders.PackageReadMesFolderName, fileName, readMeMdStream, overwrite: true);
+            }
+        }
+
+        /// <summary>
+        /// Downloads the readme.md from storage.
+        /// </summary>
+        /// <param name="package">The package associated with the readme.</param>
+        public async Task<string> DownloadReadMeMdFileAsync(Package package)
+        {
+            if (package == null)
+            {
+                throw new ArgumentNullException(nameof(package));
+            }
+            
+            var fileName = FileNameHelper.BuildFileName(package, ReadMeFilePathTemplateActive, GalleryConstants.MarkdownFileExtension);
+
+            using (var readMeMdStream = await _fileStorageService.GetFileAsync(CoreConstants.Folders.PackageReadMesFolderName, fileName))
+            {
+                // Note that fileStorageService implementations return null if not found.
+                if (readMeMdStream != null)
+                {
+                    using (var readMeMdReader = new StreamReader(readMeMdStream))
+                    {
+                        return await readMeMdReader.ReadToEndAsync();
+                    }
+                }
+            }
+
+            return null;
         }
     }
 }

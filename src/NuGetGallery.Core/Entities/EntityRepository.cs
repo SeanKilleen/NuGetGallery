@@ -1,9 +1,14 @@
-﻿using System.Linq;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace NuGetGallery
 {
-    public class EntityRepository<T> : IEntityRepository<T>
-        where T : class, IEntity, new()
+    public class EntityRepository<T>
+        : IEntityRepository<T>
+        where T : class, new()
     {
         private readonly IEntitiesContext _entities;
 
@@ -12,9 +17,9 @@ namespace NuGetGallery
             _entities = entities;
         }
 
-        public void CommitChanges()
+        public async Task CommitChangesAsync()
         {
-            _entities.SaveChanges();
+            await _entities.SaveChangesAsync();
         }
 
         public void DeleteOnCommit(T entity)
@@ -22,21 +27,14 @@ namespace NuGetGallery
             _entities.Set<T>().Remove(entity);
         }
 
-        public T GetEntity(int key)
-        {
-            return _entities.Set<T>().Find(key);
-        }
-
         public IQueryable<T> GetAll()
         {
             return _entities.Set<T>();
         }
 
-        public int InsertOnCommit(T entity)
+        public void InsertOnCommit(T entity)
         {
             _entities.Set<T>().Add(entity);
-
-            return entity.Key;
         }
     }
 }

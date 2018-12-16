@@ -1,8 +1,11 @@
+// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System;
 using System.Diagnostics;
 using System.IO;
 using System.Web;
-using Ninject;
+using NuGetGallery.Helpers;
 
 namespace NuGetGallery.AsyncFileUpload
 {
@@ -16,7 +19,7 @@ namespace NuGetGallery.AsyncFileUpload
 
         public void Init(HttpApplication application)
         {
-            _cacheService = Container.Kernel.Get<ICacheService>();
+            _cacheService = new HttpContextCacheService();
 
             application.PostAuthenticateRequest += PostAuthorizeRequest;
         }
@@ -36,7 +39,7 @@ namespace NuGetGallery.AsyncFileUpload
             }
 
             var username = app.Context.User.Identity.Name;
-            if (String.IsNullOrEmpty(username))
+            if (string.IsNullOrEmpty(username))
             {
                 return;
             }
@@ -47,8 +50,12 @@ namespace NuGetGallery.AsyncFileUpload
             string boundary = "--" + contentType.Substring(boundaryIndex + 9);
             var requestParser = new AsyncFileUploadRequestParser(boundary, request.ContentEncoding);
 
+            var headers = request.Headers;
+            string uploadTracingKey = UploadHelper.GetUploadTracingKey(headers);
+
             var progress = new AsyncFileUploadProgress(request.ContentLength);
-            _cacheService.SetProgress(username, progress);
+            var uploadKey = username + uploadTracingKey;
+            _cacheService.SetProgress(uploadKey, progress);
 
             if (request.ReadEntityBodyMode != ReadEntityBodyMode.None)
             {
@@ -58,11 +65,10 @@ namespace NuGetGallery.AsyncFileUpload
             Stream uploadStream = request.GetBufferedInputStream();
             Debug.Assert(uploadStream != null);
 
-            ReadStream(uploadStream, request, username, progress, requestParser);
+            ReadStream(uploadStream, request, uploadKey, progress, requestParser);
         }
 
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", MessageId = "request", Justification="'request' parameter is used in debug build.")]
-        private void ReadStream(Stream stream, HttpRequest request, string username, AsyncFileUploadProgress progress, AsyncFileUploadRequestParser parser)
+        private void ReadStream(Stream stream, HttpRequest request, string uploadKey, AsyncFileUploadProgress progress, AsyncFileUploadRequestParser parser)
         {
             const int bufferSize = 1024 * 4; // in bytes
 
@@ -80,7 +86,7 @@ namespace NuGetGallery.AsyncFileUpload
                     progress.FileName = parser.CurrentFileName;
                 }
 
-                _cacheService.SetProgress(username, progress);
+                _cacheService.SetProgress(uploadKey, progress);
 
 #if DEBUG
                 if (request.IsLocal)
@@ -103,7 +109,7 @@ namespace NuGetGallery.AsyncFileUpload
 
             // not a multipart content type
             string contentType = context.Request.ContentType;
-            if (contentType == null || !contentType.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase))
+            if (!contentType.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }

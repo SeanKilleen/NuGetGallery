@@ -1,6 +1,10 @@
-﻿using System.Collections.Generic;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Web.Mvc;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
@@ -8,6 +12,10 @@ namespace NuGetGallery
     public class ContactOwnersViewModel
     {
         public string PackageId { get; set; }
+
+        public string PackageVersion { get; set; }
+
+        public string ProjectUrl { get; set; }
 
         public IEnumerable<User> Owners { get; set; }
 
@@ -18,5 +26,7 @@ namespace NuGetGallery
         [Required(ErrorMessage = "Please enter a message.")]
         [StringLength(4000)]
         public string Message { get; set; }
+
+        public bool HasOwners { get; set; }
     }
 }

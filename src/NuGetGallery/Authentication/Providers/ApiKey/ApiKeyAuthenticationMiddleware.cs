@@ -1,11 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Web;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System.Web.Mvc;
 using Microsoft.Owin;
 using Microsoft.Owin.Logging;
 using Microsoft.Owin.Security.Infrastructure;
+using NuGetGallery.Infrastructure.Authentication;
 using Owin;
 
 namespace NuGetGallery.Authentication.Providers.ApiKey
@@ -24,7 +24,8 @@ namespace NuGetGallery.Authentication.Providers.ApiKey
         {
             return new ApiKeyAuthenticationHandler(
                 _logger,
-                DependencyResolver.Current.GetService<AuthenticationService>());
+                DependencyResolver.Current.GetService<AuthenticationService>(),
+                DependencyResolver.Current.GetService<ICredentialBuilder>());
         }
     }
 }

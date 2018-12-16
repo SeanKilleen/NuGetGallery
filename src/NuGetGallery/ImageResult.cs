@@ -1,3 +1,5 @@
+// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 using System;
 using System.IO;
 using System.Web;
@@ -11,12 +13,12 @@ namespace NuGetGallery
         {
             if (imageStream == null)
             {
-                throw new ArgumentNullException("imageStream");
+                throw new ArgumentNullException(nameof(imageStream));
             }
 
             if (contentType == null)
             {
-                throw new ArgumentNullException("contentType");
+                throw new ArgumentNullException(nameof(contentType));
             }
 
             ImageStream = imageStream;
@@ -30,7 +32,7 @@ namespace NuGetGallery
         {
             if (context == null)
             {
-                throw new ArgumentNullException("context");
+                throw new ArgumentNullException(nameof(context));
             }
 
             HttpResponseBase response = context.HttpContext.Response;

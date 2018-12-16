@@ -1,4 +1,6 @@
-﻿using System.Web.Mvc;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System.Web.Mvc;
 using System.Web.Routing;
 using Xunit;
 
@@ -55,6 +57,17 @@ namespace NuGetGallery.Routing
             public void ReturnsTrueIfVersionIsNull()
             {
                 var routeValues = new RouteValueDictionary { { "version", null } };
+                var constraint = new VersionRouteConstraint();
+
+                var result = constraint.Match(null, null, "version", routeValues, RouteDirection.IncomingRequest);
+
+                Assert.True(result);
+            }
+
+            [Fact]
+            public void ReturnsTrueIfVersionIsPrerelease()
+            {
+                var routeValues = new RouteValueDictionary { { "version", GalleryConstants.AbsoluteLatestUrlString } };
                 var constraint = new VersionRouteConstraint();
 
                 var result = constraint.Match(null, null, "version", routeValues, RouteDirection.IncomingRequest);

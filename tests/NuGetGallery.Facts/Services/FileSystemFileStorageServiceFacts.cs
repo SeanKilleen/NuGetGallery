@@ -1,24 +1,30 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Mvc;
 using Moq;
 using NuGetGallery.Configuration;
+using NuGetGallery.Utilities;
 using Xunit;
-using Xunit.Extensions;
 
 namespace NuGetGallery
 {
-    public class FileSystemFileStorgeServiceFacts
+    public class FileSystemFileStorageServiceFacts
     {
         private static readonly Uri HttpRequestUrl = new Uri("http://nuget.org/something");
-        private static readonly Uri HttpsRequestUrl = new Uri("https://nuget.org/something");
 
         private const string FakeConfiguredFileStorageDirectory = "theFileStorageDirectory";
 
         private static MemoryStream CreateFileStream()
         {
-            return new MemoryStream(new byte[] { 0, 0, 1, 0, 1, 0, 1, 0 }, 0, 8, true, true);
+            return new MemoryStream(new byte[] { 0, 0, 1, 0, 1, 0, 1, 0 }, index: 0, count: 8, writable: true, publiclyVisible: true);
         }
 
         private static FileSystemFileStorageService CreateService(
@@ -47,11 +53,11 @@ namespace NuGetGallery
             [Theory]
             [InlineData(null)]
             [InlineData("")]
-            public void WillThrowIfFolderNameIsNull(string folderName)
+            public async Task WillThrowIfFolderNameIsNull(string folderName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(
                     () => service.CreateDownloadFileActionResultAsync(
                         HttpRequestUrl,
                         folderName,
@@ -63,14 +69,14 @@ namespace NuGetGallery
             [Theory]
             [InlineData(null)]
             [InlineData("")]
-            public void WillThrowIfFileNameIsNull(string fileName)
+            public async Task WillThrowIfFileNameIsNull(string fileName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(
                     () => service.CreateDownloadFileActionResultAsync(
                         HttpRequestUrl,
-                        Constants.PackagesFolderName,
+                        CoreConstants.Folders.PackagesFolderName,
                         fileName));
 
                 Assert.Equal("fileName", ex.ParamName);
@@ -81,11 +87,11 @@ namespace NuGetGallery
             {
                 var service = CreateService();
 
-                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, Constants.PackagesFolderName, "theFileName") as FilePathResult;
+                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, CoreConstants.Folders.PackagesFolderName, "theFileName") as FilePathResult;
 
                 Assert.NotNull(result);
                 Assert.Equal(
-                    Path.Combine(FakeConfiguredFileStorageDirectory, Constants.PackagesFolderName, "theFileName"),
+                    Path.Combine(FakeConfiguredFileStorageDirectory, CoreConstants.Folders.PackagesFolderName, "theFileName"),
                     result.FileName);
             }
 
@@ -96,7 +102,7 @@ namespace NuGetGallery
                 fakeFileSystemService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(false);
                 var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, Constants.PackagesFolderName, "theFileName") as HttpNotFoundResult;
+                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, CoreConstants.Folders.PackagesFolderName, "theFileName") as HttpNotFoundResult;
 
                 Assert.NotNull(result);
             }
@@ -106,10 +112,21 @@ namespace NuGetGallery
             {
                 var service = CreateService();
 
-                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, Constants.PackagesFolderName, "theFileName") as FilePathResult;
+                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, CoreConstants.Folders.PackagesFolderName, "theFileName") as FilePathResult;
 
                 Assert.NotNull(result);
-                Assert.Equal(Constants.PackageContentType, result.ContentType);
+                Assert.Equal(CoreConstants.PackageContentType, result.ContentType);
+            }
+
+            [Fact]
+            public async Task WillSetTheResultContentTypeForTheSymbolPackagesFolder()
+            {
+                var service = CreateService();
+
+                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, CoreConstants.Folders.SymbolPackagesFolderName, "theFileName") as FilePathResult;
+
+                Assert.NotNull(result);
+                Assert.Equal(CoreConstants.PackageContentType, result.ContentType);
             }
 
             [Fact]
@@ -117,7 +134,7 @@ namespace NuGetGallery
             {
                 var service = CreateService();
 
-                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, Constants.PackagesFolderName, "theFileName") as FilePathResult;
+                var result = await service.CreateDownloadFileActionResultAsync(HttpRequestUrl, CoreConstants.Folders.PackagesFolderName, "theFileName") as FilePathResult;
 
                 Assert.NotNull(result);
                 Assert.Equal(
@@ -131,11 +148,11 @@ namespace NuGetGallery
             [Theory]
             [InlineData(null)]
             [InlineData("")]
-            public void WillThrowIfFolderNameIsNull(string folderName)
+            public async Task WillThrowIfFolderNameIsNull(string folderName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(
                     () => service.DeleteFileAsync(
                         folderName,
                         "theFileName"));
@@ -146,13 +163,13 @@ namespace NuGetGallery
             [Theory]
             [InlineData(null)]
             [InlineData("")]
-            public void WillThrowIfFileNameIsNull(string fileName)
+            public async Task WillThrowIfFileNameIsNull(string fileName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(
                     () => service.DeleteFileAsync(
-                        Constants.PackagesFolderName,
+                        CoreConstants.Folders.PackagesFolderName,
                         fileName));
 
                 Assert.Equal("fileName", ex.ParamName);
@@ -165,11 +182,11 @@ namespace NuGetGallery
                 fakeFileSystemService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(true);
                 var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                service.DeleteFileAsync(Constants.PackagesFolderName, "theFileName");
+                service.DeleteFileAsync(CoreConstants.Folders.PackagesFolderName, "theFileName");
 
                 fakeFileSystemService.Verify(
                     x => x.DeleteFile(
-                        Path.Combine(FakeConfiguredFileStorageDirectory, Constants.PackagesFolderName, "theFileName")));
+                        Path.Combine(FakeConfiguredFileStorageDirectory, CoreConstants.Folders.PackagesFolderName, "theFileName")));
             }
 
             [Fact]
@@ -181,7 +198,7 @@ namespace NuGetGallery
                 fakeFileSystemService.Setup(x => x.DeleteFile(It.IsAny<string>())).Callback(() => deleteWasInvoked = true);
                 var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                service.DeleteFileAsync(Constants.PackagesFolderName, "theFileName");
+                service.DeleteFileAsync(CoreConstants.Folders.PackagesFolderName, "theFileName");
 
                 Assert.False(deleteWasInvoked);
             }
@@ -192,11 +209,11 @@ namespace NuGetGallery
             [Theory]
             [InlineData(null)]
             [InlineData("")]
-            public void WillThrowIfFolderNameIsNull(string folderName)
+            public async Task WillThrowIfFolderNameIsNull(string folderName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(
                     () => service.GetFileAsync(
                         folderName,
                         "theFileName"));
@@ -207,13 +224,13 @@ namespace NuGetGallery
             [Theory]
             [InlineData(null)]
             [InlineData("")]
-            public void WillThrowIfFileNameIsNull(string fileName)
+            public async Task WillThrowIfFileNameIsNull(string fileName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(
                     () => service.GetFileAsync(
-                        Constants.PackagesFolderName,
+                        CoreConstants.Folders.PackagesFolderName,
                         fileName));
 
                 Assert.Equal("fileName", ex.ParamName);
@@ -260,13 +277,15 @@ namespace NuGetGallery
                     "theFileName");
                 var fakeFileSystemService = new Mock<IFileSystemService>();
                 fakeFileSystemService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(true);
-                var fakeFileStream = new MemoryStream();
-                fakeFileSystemService.Setup(x => x.OpenRead(expectedPath)).Returns(fakeFileStream);
-                var service = CreateService(fileSystemService: fakeFileSystemService);
+                using (var fakeFileStream = new MemoryStream())
+                {
+                    fakeFileSystemService.Setup(x => x.OpenRead(expectedPath)).Returns(fakeFileStream);
+                    var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                var fileStream = await service.GetFileAsync("theFolderName", "theFileName");
+                    var fileStream = await service.GetFileAsync("theFolderName", "theFileName");
 
-                Assert.Same(fakeFileStream, fileStream);
+                    Assert.Same(fakeFileStream, fileStream);
+                }
             }
 
             [Fact]
@@ -282,38 +301,160 @@ namespace NuGetGallery
             }
         }
 
-        public class TheSaveFileMethod
+        public class TheCopyFileAsyncMethod : IDisposable
         {
-            [Theory]
-            [InlineData(null)]
-            [InlineData("")]
-            public void WillThrowIfFolderNameIsNull(string folderName)
+            private readonly TestDirectory _directory;
+            private readonly string _srcFolderName;
+            private readonly string _srcFileName;
+            private readonly string _destFolderName;
+            private readonly string _destFileName;
+            private readonly Mock<IAppConfiguration> _appConfiguration;
+            private readonly Mock<FileSystemService> _fileSystemService;
+            private readonly FileSystemFileStorageService _target;
+
+            public TheCopyFileAsyncMethod()
             {
-                var service = CreateService();
+                _directory = TestDirectory.Create();
 
-                var ex = Assert.Throws<ArgumentNullException>(() => service.SaveFileAsync(folderName, "theFileName", CreateFileStream()));
+                _srcFolderName = "validation";
+                _srcFileName = "4b6f16cc-7acd-45eb-ac21-33f0d927ec14/nuget.versioning.4.5.0.nupkg";
+                _destFolderName = "packages";
+                _destFileName = "nuget.versioning.4.5.0.nupkg";
 
-                Assert.Equal("folderName", ex.ParamName);
-            }
+                _appConfiguration = new Mock<IAppConfiguration>();
+                _appConfiguration
+                    .Setup(x => x.FileStorageDirectory)
+                    .Returns(() => _directory);
 
-            [Theory]
-            [InlineData(null)]
-            [InlineData("")]
-            public void WillThrowIfFileNameIsNull(string fileName)
-            {
-                var service = CreateService();
+                _fileSystemService = new Mock<FileSystemService> { CallBase = true };
 
-                var ex = Assert.Throws<ArgumentNullException>(() => service.SaveFileAsync("theFolderName", fileName, CreateFileStream()));
-
-                Assert.Equal("fileName", ex.ParamName);
+                _target = new FileSystemFileStorageService(
+                    _appConfiguration.Object,
+                    _fileSystemService.Object);
             }
 
             [Fact]
-            public void WillThrowIfFileStreamIsNull()
+            public async Task CopiesFileWhenDestinationDoesNotExist()
+            {
+                // Arrange
+                var content = "Hello, world!";
+                await _target.SaveFileAsync(
+                    _srcFolderName,
+                    _srcFileName,
+                    new MemoryStream(Encoding.ASCII.GetBytes(content)));
+
+                // Act
+                await _target.CopyFileAsync(
+                    _srcFolderName,
+                    _srcFileName,
+                    _destFolderName,
+                    _destFileName,
+                    destAccessCondition: null);
+
+                // Assert
+                using (var destStream = await _target.GetFileAsync(_destFolderName, _destFileName))
+                using (var reader = new StreamReader(destStream))
+                {
+                    Assert.Equal(content, reader.ReadToEnd());
+                }
+            }
+
+            [Fact]
+            public async Task ThrowsWhenDestinationIsSame()
+            {
+                // Arrange
+                var content = "Hello, world!";
+                await _target.SaveFileAsync(
+                    _srcFolderName,
+                    _srcFileName,
+                    new MemoryStream(Encoding.ASCII.GetBytes(content)));
+                await _target.SaveFileAsync(
+                    _destFolderName,
+                    _destFileName,
+                    new MemoryStream(Encoding.ASCII.GetBytes(content)));
+
+                await Assert.ThrowsAsync<FileAlreadyExistsException>(
+                    () => _target.CopyFileAsync(
+                        _srcFolderName,
+                        _srcFileName,
+                        _destFolderName,
+                        _destFileName,
+                        destAccessCondition: null));
+            }
+
+            [Fact]
+            public async Task ThrowsWhenFileAlreadyExists()
+            {
+                // Arrange
+                var content = "Hello, world!";
+                await _target.SaveFileAsync(
+                    _srcFolderName,
+                    _srcFileName,
+                    new MemoryStream(Encoding.ASCII.GetBytes(content)));
+                await _target.SaveFileAsync(
+                    _destFolderName,
+                    _destFileName,
+                    new MemoryStream(Encoding.ASCII.GetBytes("Something else.")));
+
+                // Act & Assert
+                await Assert.ThrowsAsync<FileAlreadyExistsException>(
+                    () => _target.CopyFileAsync(
+                        _srcFolderName,
+                        _srcFileName,
+                        _destFolderName,
+                        _destFileName,
+                        destAccessCondition: null));
+            }
+
+            public void Dispose()
+            {
+                _directory?.Dispose();
+            }
+        }
+
+        public class TheSaveFileMethod
+        {
+            private const string FolderName = "theFolderName";
+            private const string FileName = "theFileName";
+            private const string FileContent = "theFileContent";
+            private const int TaskCount = 16;
+
+            [Theory]
+            [InlineData(null)]
+            [InlineData("")]
+            public async Task WillThrowIfFolderNameIsNull(string folderName)
             {
                 var service = CreateService();
 
-                var ex = Assert.Throws<ArgumentNullException>(() => service.SaveFileAsync("theFolderName", "theFileName", null));
+                using (var fakeFileStream = CreateFileStream())
+                {
+                    var ex = await Assert.ThrowsAsync<ArgumentNullException>(() => service.SaveFileAsync(folderName, FileName, fakeFileStream));
+
+                    Assert.Equal("folderName", ex.ParamName);
+                }
+            }
+
+            [Theory]
+            [InlineData(null)]
+            [InlineData("")]
+            public async Task WillThrowIfFileNameIsNull(string fileName)
+            {
+                var service = CreateService();
+
+                using (var fakeFileStream = CreateFileStream())
+                {
+                    var ex = await Assert.ThrowsAsync<ArgumentNullException>(() => service.SaveFileAsync(FolderName, fileName, fakeFileStream));
+
+                    Assert.Equal("fileName", ex.ParamName);
+                }
+            }
+
+            [Fact]
+            public async Task WillThrowIfFileStreamIsNull()
+            {
+                var service = CreateService();
+
+                var ex = await Assert.ThrowsAsync<ArgumentNullException>(() => service.SaveFileAsync(FolderName, FileName, null));
 
                 Assert.Equal("packageFile", ex.ParamName);
             }
@@ -321,14 +462,21 @@ namespace NuGetGallery
             [Fact]
             public async Task WillCreateTheConfiguredFileStorageDirectoryIfItDoesNotExist()
             {
+                const string folderName = FolderName;
                 var fakeFileSystemService = new Mock<IFileSystemService>();
                 fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(false);
-                fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>())).Returns(new MemoryStream(new byte[8]));
-                var service = CreateService(fileSystemService: fakeFileSystemService);
+                using (var fakeMemoryStream = CreateFileStream())
+                {
+                    fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>(), true)).Returns(fakeMemoryStream);
+                    var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                await service.SaveFileAsync("theFolderName", "theFileName", CreateFileStream());
+                    using (var fakePackageStream = CreateFileStream())
+                    {
+                        await service.SaveFileAsync(FolderName, FileName, fakePackageStream);
+                    }
 
-                fakeFileSystemService.Verify(x => x.CreateDirectory(FakeConfiguredFileStorageDirectory));
+                    fakeFileSystemService.Verify(x => x.CreateDirectory($"{FakeConfiguredFileStorageDirectory}\\{folderName}"));
+                }
             }
 
             [Fact]
@@ -336,12 +484,18 @@ namespace NuGetGallery
             {
                 var fakeFileSystemService = new Mock<IFileSystemService>();
                 fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(false);
-                fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>())).Returns(new MemoryStream(new byte[8]));
-                var service = CreateService(fileSystemService: fakeFileSystemService);
+                using (var fakeMemoryStream = CreateFileStream())
+                {
+                    fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>(), true)).Returns(fakeMemoryStream);
+                    var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                await service.SaveFileAsync("theFolderName", "theFileName", CreateFileStream());
+                    using (var fakePackageStream = CreateFileStream())
+                    {
+                        await service.SaveFileAsync(FolderName, FileName, fakePackageStream);
+                    }
 
-                fakeFileSystemService.Verify(x => x.CreateDirectory(Path.Combine(FakeConfiguredFileStorageDirectory, "theFolderName")));
+                    fakeFileSystemService.Verify(x => x.CreateDirectory(Path.Combine(FakeConfiguredFileStorageDirectory, FolderName)));
+                }
             }
 
             [Fact]
@@ -349,36 +503,245 @@ namespace NuGetGallery
             {
                 var fakeFileSystemService = new Mock<IFileSystemService>();
                 fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(true);
-                fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>())).Returns(new MemoryStream(new byte[8]));
-                var service = CreateService(fileSystemService: fakeFileSystemService);
+                using (var fakeMemoryStream = CreateFileStream())
+                {
+                    fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>(), true)).Returns(fakeMemoryStream);
+                    var service = CreateService(fileSystemService: fakeFileSystemService);
 
-                await service.SaveFileAsync("theFolderName", "theFileName", CreateFileStream());
+                    using (var fakePackageStream = CreateFileStream())
+                    {
+                        await service.SaveFileAsync(FolderName, FileName, fakePackageStream);
+                    }
 
-                fakeFileSystemService.Verify(
-                    x =>
-                    x.OpenWrite(
-                        Path.Combine(
-                            FakeConfiguredFileStorageDirectory,
-                            "theFolderName",
-                            "theFileName")));
+                    fakeFileSystemService.Verify(
+                        x =>
+                        x.OpenWrite(
+                            Path.Combine(
+                                FakeConfiguredFileStorageDirectory,
+                                FolderName,
+                                FileName),
+                            true));
+                }
             }
 
             [Fact]
             public async Task WillSaveThePackageFileBytes()
             {
-                var fakePackageFile = CreateFileStream();
-                var fakeFileStream = new MemoryStream(new byte[8], 0, 8, true, true);
-                var fakeFileSystemService = new Mock<IFileSystemService>();
-                fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(true);
-                fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>())).Returns(fakeFileStream);
-                var service = CreateService(fileSystemService: fakeFileSystemService);
-
-                await service.SaveFileAsync("theFolderName", "theFileName", CreateFileStream());
-
-                for (var i = 0; i < fakePackageFile.Length; i++)
+                using (var fakePackageFile = CreateFileStream())
                 {
-                    Assert.Equal(fakePackageFile.GetBuffer()[i], fakeFileStream.GetBuffer()[i]);
+                    using (var fakeFileStream = CreateFileStream())
+                    {
+                        var fakeFileSystemService = new Mock<IFileSystemService>();
+                        fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(true);
+                        fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>(), true)).Returns(fakeFileStream);
+                        var service = CreateService(fileSystemService: fakeFileSystemService);
+
+                        using (var fakePackageStream = CreateFileStream())
+                        {
+                            await service.SaveFileAsync(FolderName, FileName, fakePackageStream);
+                        }
+
+                        for (var i = 0; i < fakePackageFile.Length; i++)
+                        {
+                            Assert.Equal(fakePackageFile.GetBuffer()[i], fakeFileStream.GetBuffer()[i]);
+                        }
+                    }
                 }
+            }
+
+            [Fact]
+            public async Task WillOverwriteFileIfOverwriteTrue()
+            {
+                using (var fakePackageFile = CreateFileStream())
+                {
+                    using (var fakeFileStream = CreateFileStream())
+                    {
+                        var fakeFileSystemService = new Mock<IFileSystemService>();
+                        fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(true);
+                        fakeFileSystemService.Setup(x => x.OpenWrite(It.IsAny<string>(), true)).Returns(fakeFileStream);
+                        fakeFileSystemService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(true);
+                        var service = CreateService(fileSystemService: fakeFileSystemService);
+
+                        await service.SaveFileAsync(FolderName, FileName, fakePackageFile);
+
+                        for (var i = 0; i < fakePackageFile.Length; i++)
+                        {
+                            Assert.Equal(fakePackageFile.GetBuffer()[i], fakeFileStream.GetBuffer()[i]);
+                        }
+
+                        fakeFileSystemService.Verify();
+                    }
+                }
+            }
+
+            [Fact]
+            public async Task WillThrowIfFileExistsAndOverwriteFalse()
+            {
+                using (var fakeFileStream = CreateFileStream())
+                {
+                    var fakeFileSystemService = new Mock<IFileSystemService>();
+                    fakeFileSystemService.Setup(x => x.DirectoryExists(It.IsAny<string>())).Returns(true);
+                    fakeFileSystemService
+                        .Setup(x => x.OpenWrite(It.IsAny<string>(), false))
+                        .Throws(new IOException("The file already exists"));
+                    fakeFileSystemService.Setup(x => x.FileExists(It.IsAny<string>())).Returns(true);
+                    var service = CreateService(fileSystemService: fakeFileSystemService);
+
+                    await Assert.ThrowsAsync<FileAlreadyExistsException>(async () => await service.SaveFileAsync(FolderName, FileName, fakeFileStream, false));
+
+                    fakeFileSystemService.Verify();
+                }
+            }
+
+            [Fact]
+            public async Task WillOverwriteFileIfOverwriteTrueAndRealFileSystemIsUsed()
+            {
+                // Arrange
+                using (var testDirectory = TestDirectory.Create())
+                {
+                    var fileSystemService = new FileSystemService();
+
+                    var configuration = new Mock<IAppConfiguration>();
+                    configuration
+                        .Setup(x => x.FileStorageDirectory)
+                        .Returns(testDirectory);
+
+                    var service = new FileSystemFileStorageService(
+                        configuration.Object,
+                        fileSystemService);
+
+                    var directory = Path.Combine(testDirectory, FolderName);
+                    var filePath = Path.Combine(directory, FileName);
+                    Directory.CreateDirectory(directory);
+                    File.WriteAllText(filePath, string.Empty);
+
+                    // Act
+                    await service.SaveFileAsync(
+                        FolderName,
+                        FileName,
+                        new MemoryStream(Encoding.ASCII.GetBytes(FileContent)),
+                        overwrite: true);
+
+                    Assert.True(File.Exists(filePath), $"The file at path {filePath} should exist, but does not.");
+                    Assert.Equal(FileContent, File.ReadAllText(filePath));
+                }
+            }
+
+            [Fact]
+            public async Task WillThrowIfFileExistsAndOverwriteFalseAndRealFileSystemIsUsed()
+            {
+                // Arrange
+                using (var testDirectory = TestDirectory.Create())
+                {
+                    var fileSystemService = new FileSystemService();
+
+                    var configuration = new Mock<IAppConfiguration>();
+                    configuration
+                        .Setup(x => x.FileStorageDirectory)
+                        .Returns(testDirectory);
+
+                    var service = new FileSystemFileStorageService(
+                        configuration.Object,
+                        fileSystemService);
+
+                    var directory = Path.Combine(testDirectory, FolderName);
+                    var filePath = Path.Combine(directory, FileName);
+                    Directory.CreateDirectory(directory);
+                    File.WriteAllText(filePath, FileContent);
+
+                    // Act
+                    var exception = await Assert.ThrowsAsync<FileAlreadyExistsException>(() => service.SaveFileAsync(
+                        FolderName,
+                        FileName,
+                        new MemoryStream(),
+                        overwrite: false));
+
+                    Assert.True(File.Exists(filePath), $"The file at path {filePath} should exist, but does not.");
+                    Assert.Equal(FileContent, File.ReadAllText(filePath));
+                }
+            }
+
+            [Fact]
+            public async Task WillThrowIfFileExistsWhenManyThreadsAreTryingToSaveWithoutOverwriting()
+            {
+                // Arrange
+                using (var testDirectory = TestDirectory.Create())
+                {
+                    var fileSystemService = new FileSystemService();
+
+                    var configuration = new Mock<IAppConfiguration>();
+                    configuration
+                        .Setup(x => x.FileStorageDirectory)
+                        .Returns(testDirectory);
+
+                    var service = new FileSystemFileStorageService(
+                        configuration.Object,
+                        fileSystemService);
+
+                    for (var i = 0; i < 10; i++)
+                    {
+                        var fileName = FileName + i;
+                        var barrier = new Barrier(TaskCount);
+                        var tasks = new List<Task<bool>>();
+
+                        // Act
+                        for (var taskIndex = 0; taskIndex < TaskCount; taskIndex++)
+                        {
+                            var task = SaveFileAsync(service, fileName, barrier);
+                            tasks.Add(task);
+                        }
+
+                        var results = await Task.WhenAll(tasks);
+
+                        // Assert
+                        // One task should succeed. One should fail.
+                        Assert.Equal(1, results.Count(success => success));
+                        Assert.Equal(TaskCount - 1, results.Count(success => !success));
+                    }
+                }
+            }
+
+            private static async Task<bool> SaveFileAsync(FileSystemFileStorageService service, string fileName, Barrier barrier)
+            {
+                await Task.Yield();
+
+                try
+                {
+                    barrier.SignalAndWait();
+                    await service.SaveFileAsync(
+                        FolderName,
+                        fileName,
+                        new MemoryStream(),
+                        overwrite: false);
+
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
+        public class TheSetMetadataAsyncMethod
+        {
+            [Fact]
+            public async Task NoOps()
+            {
+                var service = CreateService();
+
+                await service.SetMetadataAsync(folderName: null, fileName: null, updateMetadataAsync: null);
+            }
+        }
+
+        public class TheSetPropertiesAsyncMethod
+        {
+            [Fact]
+            public async Task NoOps()
+            {
+                var service = CreateService();
+
+                await service.SetPropertiesAsync(folderName: null, fileName: null, updatePropertiesAsync: null);
             }
         }
     }

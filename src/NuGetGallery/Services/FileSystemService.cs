@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.IO;
 
 namespace NuGetGallery
@@ -30,9 +32,13 @@ namespace NuGetGallery
             return File.OpenRead(path);
         }
 
-        public Stream OpenWrite(string path)
+        public Stream OpenWrite(string path, bool overwrite)
         {
-            return File.OpenWrite(path);
+            return new FileStream(
+                path,
+                overwrite ? FileMode.Create : FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None);
         }
 
         public DateTimeOffset GetCreationTimeUtc(string path)
@@ -44,6 +50,11 @@ namespace NuGetGallery
         {
             var info = new FileInfo(path);
             return info.Exists ? new LocalFileReference(info) : null;
+        }
+
+        public virtual void Copy(string sourceFileName, string destFileName, bool overwrite)
+        {
+            File.Copy(sourceFileName, destFileName, overwrite);
         }
     }
 }

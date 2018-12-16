@@ -1,118 +1,322 @@
-﻿using System.Linq;
-using System.Web.Mvc;
-using MvcHaack.Ajax;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Web;
+using System.Web.Mvc;
+using NuGet.Services.Entities;
+using NuGet.Services.Messaging.Email;
+using NuGetGallery.Configuration;
+using NuGetGallery.Filters;
+using NuGetGallery.Infrastructure.Mail.Messages;
+using NuGetGallery.Security;
 
 namespace NuGetGallery
 {
-    public partial class JsonApiController : JsonController
+    [UIAuthorize]
+    public partial class JsonApiController
+        : AppController
     {
         private readonly IMessageService _messageService;
-        private readonly IEntityRepository<PackageOwnerRequest> _packageOwnerRequestRepository;
         private readonly IPackageService _packageService;
         private readonly IUserService _userService;
+        private readonly IAppConfiguration _appConfiguration;
+        private readonly ISecurityPolicyService _policyService;
+        private readonly IPackageOwnershipManagementService _packageOwnershipManagementService;
 
         public JsonApiController(
             IPackageService packageService,
             IUserService userService,
-            IEntityRepository<PackageOwnerRequest> packageOwnerRequestRepository,
-            IMessageService messageService)
+            IMessageService messageService,
+            IAppConfiguration appConfiguration,
+            ISecurityPolicyService policyService,
+            IPackageOwnershipManagementService packageOwnershipManagementService)
         {
             _packageService = packageService;
             _userService = userService;
-            _packageOwnerRequestRepository = packageOwnerRequestRepository;
             _messageService = messageService;
+            _appConfiguration = appConfiguration;
+            _policyService = policyService;
+            _packageOwnershipManagementService = packageOwnershipManagementService;
         }
 
-        [Authorize]
-        public virtual object GetPackageOwners(string id, string version)
+        [HttpGet]
+        public virtual ActionResult GetPackageOwners(string id, string version)
         {
             var package = _packageService.FindPackageByIdAndVersion(id, version);
             if (package == null)
             {
-                return new { message = "Package not found" };
+                return Json(new { message = Strings.AddOwner_PackageNotFound });
             }
-            if (!package.IsOwner(HttpContext.User))
+
+            var currentUser = GetCurrentUser();
+            if (ActionsRequiringPermissions.ManagePackageOwnership.CheckPermissionsOnBehalfOfAnyAccount(currentUser, package) != PermissionsCheckResult.Allowed)
             {
-                return new HttpStatusCodeResult(401, "Unauthorized");
+                return new HttpUnauthorizedResult();
             }
 
-            var owners = from u in package.PackageRegistration.Owners
-                         select new OwnerModel
-                             {
-                                 name = u.Username,
-                                 current = u.Username == HttpContext.User.Identity.Name,
-                                 pending = false
-                             };
+            var packageRegistration = package.PackageRegistration;
+            var packageRegistrationOwners = package.PackageRegistration.Owners;
+            var allMatchingNamespaceOwners = package
+                .PackageRegistration
+                .ReservedNamespaces
+                .SelectMany(rn => rn.Owners)
+                .Distinct();
 
-            var pending = from u in _packageOwnerRequestRepository.GetAll()
-                          where u.PackageRegistrationKey == package.PackageRegistration.Key
-                          select new OwnerModel { name = u.NewOwner.Username, current = false, pending = true };
+            var packageAndReservedNamespaceOwners = packageRegistrationOwners.Intersect(allMatchingNamespaceOwners);
+            var packageOwnersOnly = packageRegistrationOwners.Except(packageAndReservedNamespaceOwners);
 
-            return owners.Union(pending);
+            var owners =
+                packageAndReservedNamespaceOwners
+                .Select(u => new PackageOwnersResultViewModel(
+                    u,
+                    currentUser,
+                    packageRegistration,
+                    Url,
+                    isPending: false,
+                    isNamespaceOwner: true));
+
+            var packageOwnersOnlyResultViewModel =
+                packageOwnersOnly
+                .Select(u => new PackageOwnersResultViewModel(
+                    u,
+                    currentUser,
+                    packageRegistration,
+                    Url,
+                    isPending: false,
+                    isNamespaceOwner: false));
+
+            owners = owners.Union(packageOwnersOnlyResultViewModel);
+
+            var pending =
+                _packageOwnershipManagementService.GetPackageOwnershipRequests(package: package.PackageRegistration)
+                .Select(r => new PackageOwnersResultViewModel(
+                    r.NewOwner,
+                    currentUser,
+                    packageRegistration,
+                    Url,
+                    isPending: true,
+                    isNamespaceOwner: false));
+
+            var result = owners.Union(pending);
+
+            return Json(result, JsonRequestBehavior.AllowGet);
         }
 
-        public object AddPackageOwner(string id, string username)
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<JsonResult> AddPackageOwner(string id, string username, string message)
         {
+            if (Regex.IsMatch(username, GalleryConstants.EmailValidationRegex, RegexOptions.None, GalleryConstants.EmailValidationRegexTimeout))
+            {
+                return Json(new { success = false, message = Strings.AddOwner_NameIsEmail }, JsonRequestBehavior.AllowGet);
+            }
+
+            if (TryGetManagePackageOwnerModel(id, username, isAddOwner: true, model: out var model))
+            {
+                var packageUrl = Url.Package(model.Package.Id, version: null, relativeUrl: false);
+
+                if (model.CurrentUserCanAcceptOnBehalfOfUser)
+                {
+                    await _packageOwnershipManagementService.AddPackageOwnerAsync(model.Package, model.User);
+
+                    foreach (var owner in model.Package.Owners)
+                    {
+                        var emailMessage = new PackageOwnerAddedMessage(_appConfiguration, owner, model.User, model.Package, packageUrl);
+                        await _messageService.SendMessageAsync(emailMessage);
+                    }
+                }
+                else
+                {
+                    var encodedMessage = HttpUtility.HtmlEncode(message);
+
+                    var ownerRequest = await _packageOwnershipManagementService.AddPackageOwnershipRequestAsync(
+                        model.Package, model.CurrentUser, model.User);
+
+                    var confirmationUrl = Url.ConfirmPendingOwnershipRequest(
+                        model.Package.Id,
+                        model.User.Username,
+                        ownerRequest.ConfirmationCode,
+                        relativeUrl: false);
+
+                    var rejectionUrl = Url.RejectPendingOwnershipRequest(
+                        model.Package.Id,
+                        model.User.Username,
+                        ownerRequest.ConfirmationCode,
+                        relativeUrl: false);
+
+                    var cancellationUrl = Url.CancelPendingOwnershipRequest(
+                        model.Package.Id,
+                        model.CurrentUser.Username,
+                        model.User.Username,
+                        relativeUrl: false);
+
+                    var packageOwnershipRequestMessage = new PackageOwnershipRequestMessage(
+                        _appConfiguration,
+                        model.CurrentUser,
+                        model.User,
+                        model.Package,
+                        packageUrl,
+                        confirmationUrl,
+                        rejectionUrl,
+                        encodedMessage,
+                        string.Empty);
+                    await _messageService.SendMessageAsync(packageOwnershipRequestMessage);
+
+                    foreach (var owner in model.Package.Owners)
+                    {
+                        var emailMessage = new PackageOwnershipRequestInitiatedMessage(_appConfiguration, model.CurrentUser, owner, model.User, model.Package, cancellationUrl);
+
+                        await _messageService.SendMessageAsync(emailMessage);
+                    }
+                }
+
+                return Json(new
+                {
+                    success = true,
+                    model = new PackageOwnersResultViewModel(
+                        model.User,
+                        model.CurrentUser,
+                        model.Package,
+                        Url,
+                        isPending: !model.CurrentUserCanAcceptOnBehalfOfUser,
+                        isNamespaceOwner: false)
+                });
+            }
+            else
+            {
+                return Json(new { success = false, message = model.Error }, JsonRequestBehavior.AllowGet);
+            }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<JsonResult> RemovePackageOwner(string id, string username)
+        {
+            ManagePackageOwnerModel model;
+            if (TryGetManagePackageOwnerModel(id, username, isAddOwner: false, model: out model))
+            {
+                var request = _packageOwnershipManagementService.GetPackageOwnershipRequests(package: model.Package, newOwner: model.User).FirstOrDefault();
+
+                if (request == null)
+                {
+                    if (model.Package.Owners.Count == 1 && model.User == model.Package.Owners.Single())
+                    {
+                        return Json(new { success = false, message = "You can't remove the only owner from a package." }, JsonRequestBehavior.AllowGet);
+                    }
+
+                    await _packageOwnershipManagementService.RemovePackageOwnerAsync(model.Package, model.CurrentUser, model.User, commitAsTransaction: true);
+
+                    var emailMessage = new PackageOwnerRemovedMessage(_appConfiguration, model.CurrentUser, model.User, model.Package);
+                    await _messageService.SendMessageAsync(emailMessage);
+                }
+                else
+                {
+                    await _packageOwnershipManagementService.DeletePackageOwnershipRequestAsync(model.Package, model.User);
+
+                    var emailMessage = new PackageOwnershipRequestCanceledMessage(_appConfiguration, model.CurrentUser, model.User, model.Package);
+                    await _messageService.SendMessageAsync(emailMessage);
+                }
+
+                return Json(new { success = true });
+            }
+            else
+            {
+                return Json(new { success = false, message = model.Error }, JsonRequestBehavior.AllowGet);
+            }
+        }
+
+        private bool TryGetManagePackageOwnerModel(string id, string username, bool isAddOwner, out ManagePackageOwnerModel model)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                throw new ArgumentException(nameof(id));
+            }
+            if (string.IsNullOrEmpty(username))
+            {
+                throw new ArgumentException(nameof(username));
+            }
+
             var package = _packageService.FindPackageRegistrationById(id);
             if (package == null)
             {
-                return new { success = false, message = "Package not found." };
+                model = new ManagePackageOwnerModel(Strings.AddOwner_PackageNotFound);
+                return false;
             }
-            if (!package.IsOwner(HttpContext.User))
+
+            var currentUser = GetCurrentUser();
+            if (currentUser == null)
             {
-                return new { success = false, message = "You are not the package owner." };
+                model = new ManagePackageOwnerModel(Strings.AddOwner_CurrentUserNotFound);
+                return false;
             }
+
+            if (ActionsRequiringPermissions.ManagePackageOwnership.CheckPermissionsOnBehalfOfAnyAccount(currentUser, package) != PermissionsCheckResult.Allowed)
+            {
+                model = new ManagePackageOwnerModel(Strings.AddOwner_NotPackageOwner);
+                return false;
+            }
+
             var user = _userService.FindByUsername(username);
             if (user == null)
             {
-                return new { success = false, message = "Owner not found." };
+                model = new ManagePackageOwnerModel(Strings.AddOwner_OwnerNotFound);
+                return false;
             }
             if (!user.Confirmed)
             {
-                return new { success = false, message = string.Format(CultureInfo.InvariantCulture, "Sorry, {0} hasn't verified their email account yet and we cannot proceed with the request.", username) };
+                model = new ManagePackageOwnerModel(
+                    string.Format(CultureInfo.CurrentCulture, Strings.AddOwner_OwnerNotConfirmed, username));
+                return false;
             }
 
-            var currentUser = _userService.FindByUsername(HttpContext.User.Identity.Name);
-            var ownerRequest = _packageService.CreatePackageOwnerRequest(package, currentUser, user);
+            var isOwner =
+                package.Owners.Any(o => o.MatchesUser(user)) ||
+                _packageOwnershipManagementService.GetPackageOwnershipRequests(package: package, newOwner: user).Any();
 
-            var confirmationUrl = Url.ConfirmationUrl(
-                "ConfirmOwner", 
-                "Packages",
-                user.Username,
-                ownerRequest.ConfirmationCode,
-                new { id = package.Id });
-            _messageService.SendPackageOwnerRequest(currentUser, user, package, confirmationUrl);
+            if (isAddOwner && isOwner)
+            {
+                model = new ManagePackageOwnerModel(
+                    string.Format(CultureInfo.CurrentCulture, Strings.AddOwner_AlreadyOwner, username));
+                return false;
+            }
 
-            return new { success = true, name = user.Username, pending = true };
+            if (!isAddOwner && !isOwner)
+            {
+                model = new ManagePackageOwnerModel(
+                    string.Format(CultureInfo.CurrentCulture, Strings.RemoveOwner_NotOwner, username));
+                return false;
+            }
+
+            model = new ManagePackageOwnerModel(package, user, currentUser);
+            return true;
         }
 
-        public object RemovePackageOwner(string id, string username)
+        private class ManagePackageOwnerModel
         {
-            var package = _packageService.FindPackageRegistrationById(id);
-            if (package == null)
+            public ManagePackageOwnerModel(string error)
             {
-                return new { success = false, message = "Package not found" };
-            }
-            if (!package.IsOwner(HttpContext.User))
-            {
-                return new { success = false, message = "You are not the package owner." };
-            }
-            var user = _userService.FindByUsername(username);
-            if (user == null)
-            {
-                return new { success = false, message = "Owner not found" };
+                Error = error;
             }
 
-            _packageService.RemovePackageOwner(package, user);
-            return new { success = true };
-        }
+            public ManagePackageOwnerModel(PackageRegistration package, User user, User currentUser)
+            {
+                Package = package;
+                User = user;
+                CurrentUser = currentUser;
+                CurrentUserCanAcceptOnBehalfOfUser =
+                    ActionsRequiringPermissions.HandlePackageOwnershipRequest.CheckPermissions(currentUser, user) == PermissionsCheckResult.Allowed;
+            }
 
-        public class OwnerModel
-        {
-            public string name { get; set; }
-            public bool current { get; set; }
-            public bool pending { get; set; }
+            public PackageRegistration Package { get; }
+            public User User { get; }
+            public User CurrentUser { get; }
+            public bool CurrentUserCanAcceptOnBehalfOfUser { get; }
+            public string Error { get; }
         }
     }
 }

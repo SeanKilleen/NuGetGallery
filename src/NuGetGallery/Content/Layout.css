@@ -1,10 +1,22 @@
-﻿/* This CSS file contains elements specific to the SHARED LAYOUT [Layout.cshtml, TwoColumnLayout.cshtml etc] 
+﻿/* This CSS file contains elements specific to the SHARED LAYOUT [Layout.cshtml] 
    that are used across the whole site */
 
-/* Service Alert */
+ul.share-buttons{
+  list-style: none;
+  padding: 0;
+}
 
-#service-alert {
-    display: none;
+ul.share-buttons li{
+  display: inline;
+}
+
+ul.share-buttons a {
+    text-decoration: none;
+    margin-right: 8px;
+}
+
+ul.share-buttons i {
+    font-size: 1.6em;
 }
 
 /* Service Alert/Banners */
@@ -39,6 +51,27 @@
         text-decoration: underline;
     }
 
+.banner-redesign, .banner-cookies {
+    padding: 0.25em;
+    text-align: center;
+    color: #FFFFFF;
+    background-color: #004880;
+    font-family: "Segoe UI";
+    font-size: 1.75em;
+    font-weight: 100;
+    line-height: 40px;
+}
+
+    .banner-redesign .ms-Icon, .banner-cookies .ms-Icon {
+        position: relative;
+        top: .1em;
+        font-size: 0.8em;
+    }
+
+    .banner-redesign a, .banner-cookies a {
+        color: white;
+        text-decoration: underline;
+    }
 /* Header */
 
 header.main {
@@ -203,7 +236,10 @@ nav.main {
     color: #3e483c;
     padding-bottom: 1em;
     padding-top: 0px;
-    position: relative;
+    position: absolute;
+    width: 100%;
+    bottom: 0px;
+    min-height: 220px;
 }
 
 footer#footer {
@@ -274,12 +310,15 @@ footer#footer {
 
 #outer-wrapper {
     background: url('../Content/Images/headerbackground.png') repeat-x top left #fff;
+    position: relative;
+    min-height: 100%;
 }
 
 #content-wrapper {
     margin: 0 auto;
     min-width: 960px;
     width: 960px;
+    padding-bottom: 250px;
 }
 
 /* Columns (For Two-Column Layout) */

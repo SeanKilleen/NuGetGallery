@@ -1,23 +1,24 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Microsoft.Owin;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 namespace NuGetGallery.Authentication.Providers
 {
     public class AuthenticatorUI
     {
-        public string SignInMessage { get; private set; }
-        public string AccountNoun { get; private set; }
-        public string Caption { get; private set; }
-        public string IconCssClass { get; set; }
+        public string SignInMessage { get; }
+        public string RegisterMessage { get; }
+        public string AccountNoun { get; }
+        public string IconImagePath { get; set; }
+        public string IconImageFallbackPath { get; set; }
+        public bool ShowOnLoginPage { get; set; }
 
-        public AuthenticatorUI(string signInMessage, string accountNoun, string caption)
+        public AuthenticatorUI(string signInMessage, string registerMessage, string accountNoun)
         {
             SignInMessage = signInMessage;
+            RegisterMessage = registerMessage;
             AccountNoun = accountNoun;
-            Caption = caption;
+
+            ShowOnLoginPage = true;
         }
     }
 }

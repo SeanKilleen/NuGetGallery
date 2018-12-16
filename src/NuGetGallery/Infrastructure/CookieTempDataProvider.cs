@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Web;
@@ -16,8 +18,9 @@ namespace NuGetGallery
         {
             if (httpContext == null)
             {
-                throw new ArgumentNullException("httpContext");
+                throw new ArgumentNullException(nameof(httpContext));
             }
+
             _httpContext = httpContext;
         }
 
@@ -53,10 +56,20 @@ namespace NuGetGallery
             {
                 return dictionary;
             }
+
             foreach (var key in cookie.Values.AllKeys)
             {
-                dictionary[key] = cookie[key];
+                // As the index setter on HttpCookie does not guard against null keys,
+                // we should guard against ArgumentNullException on Dictionary.Insert
+                // when key == null.
+                if (key == null)
+                {
+                    continue;
+                }
+
+                dictionary[key] = HttpUtility.UrlDecode(cookie[key]);
             }
+
             cookie.Expires = DateTime.MinValue;
             cookie.Value = String.Empty;
             if (CookieHasTempData)
@@ -73,8 +86,17 @@ namespace NuGetGallery
             {
                 var cookie = new HttpCookie(TempDataCookieKey);
                 cookie.HttpOnly = true;
+                cookie.Secure = true;
                 foreach (var item in values)
                 {
+                    // As the index setter on HttpCookie does not guard against null keys,
+                    // we should guard against ArgumentNullException on Dictionary.Insert
+                    // when key == null.
+                    if (item.Key == null)
+                    {
+                        continue;
+                    }
+
                     cookie[item.Key] = Convert.ToString(item.Value, CultureInfo.InvariantCulture);
                 }
                 _httpContext.Response.Cookies.Add(cookie);

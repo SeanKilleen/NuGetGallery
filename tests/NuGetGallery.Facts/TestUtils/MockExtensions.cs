@@ -1,17 +1,36 @@
-﻿using Moq.Language.Flow;
-using System.Threading.Tasks;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
+using System.Data.Entity;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Moq;
-using NuGetGallery.Authentication;
-using System;
-using Xunit;
 using Moq.Language;
+using Moq.Language.Flow;
+using NuGetGallery.Authentication;
+using Xunit;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
     public static class MockExtensions
     {
+        public static Mock<DbSet<T>> MockDbSet<T>(this IEnumerable<T> data)
+           where T : class, IEntity
+        {
+            var query = data.AsQueryable();
+
+            var dbSet = new Mock<DbSet<T>>();
+            dbSet.As<IQueryable<T>>().Setup(s => s.Provider).Returns(query.Provider);
+            dbSet.As<IQueryable<T>>().Setup(s => s.Expression).Returns(query.Expression);
+            dbSet.As<IQueryable<T>>().Setup(s => s.ElementType).Returns(query.ElementType);
+            dbSet.As<IQueryable<T>>().Setup(s => s.GetEnumerator()).Returns(() => data.GetEnumerator());
+
+            return dbSet;
+        }
+
         // Helper to get around Mock Returns((Type)null) weirdness.
         public static IReturnsResult<TMock> ReturnsNull<TMock, TRet>(this IReturns<TMock, TRet> self)
             where TMock : class
@@ -25,12 +44,6 @@ namespace NuGetGallery
             where TRet : class
         {
             return self.Returns(Task.FromResult((TRet)null));
-        }
-
-        public static IReturnsResult<TMock> Completes<TMock>(this IReturns<TMock, Task> self)
-            where TMock : class
-        {
-            return self.Returns(Task.FromResult((object)null));
         }
 
         public static IReturnsResult<TMock> CompletesWith<TMock, TRet>(this IReturns<TMock, Task<TRet>> self, TRet value)
@@ -60,20 +73,40 @@ namespace NuGetGallery
         public static void VerifyCommitted<T>(this Mock<IEntityRepository<T>> self)
             where T : class, IEntity, new()
         {
-            self.Verify(e => e.CommitChanges());
+            self.VerifyCommitted(Times.AtLeastOnce());
+        }
+
+        public static void VerifyCommitted<T>(this Mock<IEntityRepository<T>> self, Times times)
+            where T : class, IEntity, new()
+        {
+            self.Verify(e => e.CommitChangesAsync(), times);
         }
 
         public static void VerifyCommitted(this Mock<IEntitiesContext> self)
         {
-            self.Verify(e => e.SaveChanges());
+            self.VerifyCommitted(Times.AtLeastOnce());
         }
 
-        public static IReturnsResult<AuthenticationService> SetupAuth(this Mock<AuthenticationService> self, Credential cred, User user)
+        public static void VerifyCommitted(this Mock<IEntitiesContext> self, Times times)
         {
-            return self.Setup(us => us.Authenticate(It.Is<Credential>(c =>
-                String.Equals(c.Type, cred.Type, StringComparison.OrdinalIgnoreCase) &&
-                String.Equals(c.Value, cred.Value, StringComparison.Ordinal))))
-                .Returns(user == null ? null : new AuthenticatedUser(user, cred));
+            self.Verify(e => e.SaveChangesAsync(), times);
+        }
+
+        public static IReturnsResult<AuthenticationService> SetupAuth(this Mock<AuthenticationService> self, Credential cred, User user, string credentialValue = null)
+        {
+            if (CredentialTypes.IsApiKey(cred.Type))
+            {
+                return self.Setup(us => us.Authenticate(It.Is<string>(c =>
+                            string.Equals(c, credentialValue ?? cred.Value, StringComparison.Ordinal))))
+                    .Returns(Task.FromResult(user == null ? null : new AuthenticatedUser(user, cred)));
+            }
+            else
+            {
+                return self.Setup(us => us.Authenticate(It.Is<Credential>(c =>
+                        string.Equals(c.Type, cred.Type, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(c.Value, credentialValue ?? cred.Value, StringComparison.Ordinal))))
+                    .Returns(Task.FromResult(user == null ? null : new AuthenticatedUser(user, cred)));
+            }
         }
     }
 }

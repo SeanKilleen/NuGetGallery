@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,14 +16,12 @@ namespace NuGetGallery.Areas.Admin.DynamicData
         private static readonly Dictionary<string, string[]> SortOrders = new Dictionary<string, string[]>()
         {
             {"Users", new [] { "Username", "EmailAddress", "UnconfirmedEmailAddress" } },
-            {"CuratedPackages", new [] { "PackageRegistration", "CuratedFeed", "Notes" } },
             {"EmailMessages", new [] { "Subject", "Body", "FromUser", "ToUser", "Sent" } },
             {"PackageDependencies", new [] { "Package", "Id", "VersionSpec", "TargetFramework" } },
             {"PackageFrameworks", new [] { "Package" } },
             {"PackageOwnerRequests", new [] { "PackageRegistrationKey", "NewOwner", "RequestingOwner", "RequestDate", "ConfirmationCode" } },
             {"PackageRegistrations", new [] { "Id", "Owners", "Packages", "DownloadCount" } },
-            {"Packages", new [] { "PackageRegistration", "Title", "Version", "Created", "Description" } },
-            {"PackageStatistics", new [] { "Package", "Operation", "UserAgent", "IPAddress" } }
+            {"Packages", new [] { "PackageRegistration", "Title", "Version", "Created", "Description" } }
         };
 
         protected MetaTable _table;
@@ -38,7 +38,7 @@ namespace NuGetGallery.Areas.Admin.DynamicData
                 ((!(control is IDataBoundListControl) && !(control is Repeater)) && (control is IDataBoundItemControl)) ?
                 ContainerType.Item :
                 ContainerType.List;
-            var mode = itemControl == null ? DataBoundControlMode.ReadOnly : itemControl.Mode;
+            var mode = itemControl?.Mode ?? DataBoundControlMode.ReadOnly;
 
             var columns = _table.GetScaffoldColumns(mode, containerType);
             

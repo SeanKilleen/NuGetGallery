@@ -1,4 +1,6 @@
-﻿using System.Linq;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System.Linq;
 using Lucene.Net.Analysis;
 using Lucene.Net.Analysis.Tokenattributes;
 using Lucene.Net.Index;
@@ -22,7 +24,7 @@ namespace NuGetGallery
 
             // This attribute way of getting token properties isn't very good, but it's the non-obsolete one.
             var attr1 = filter.GetAttribute<ITermAttribute>();
-            Func<string> getText = () => attr1 != null ? attr1.Term : null;
+            Func<string> getText = () => attr1?.Term;
 
             Func<int> getPositionIncrement;
             if (filter.HasAttribute<IPositionIncrementAttribute>())

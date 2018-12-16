@@ -1,48 +1,31 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Data.Services;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Net.Mail;
-using System.Runtime.Versioning;
 using System.Security;
 using System.Security.Claims;
 using System.Security.Principal;
-using System.ServiceModel.Activation;
 using System.Text;
 using System.Web;
 using System.Web.Mvc;
-using System.Web.Routing;
+using System.Web.Mvc.Html;
 using System.Web.WebPages;
 using Microsoft.Owin;
-using NuGet;
+using Microsoft.Owin.Security;
+using NuGet.Frameworks;
+using NuGet.Packaging;
+using NuGet.Services.Entities;
+using NuGetGallery.Helpers;
 
 namespace NuGetGallery
 {
     public static class ExtensionMethods
     {
-        public static string ToJavaScriptUTC(this DateTime self)
-        {
-            return self.ToUniversalTime().ToString("O", CultureInfo.CurrentCulture);
-        }
-
-        public static string ToNuGetShortDateTimeString(this DateTime self)
-        {
-            return self.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.CurrentCulture);
-        }
-
-        public static string ToNuGetShortDateString(this DateTime self)
-        {
-            return self.ToString("yyyy-MM-dd", CultureInfo.CurrentCulture);
-        }
-
-        public static string ToNuGetLongDateString(this DateTime self)
-        {
-            return self.ToString("dddd, MMMM dd yyyy", CultureInfo.CurrentCulture);
-        }
-
         public static void AddOrSet<TKey, TValue>(this ConcurrentDictionary<TKey, TValue> self, TKey key, TValue val)
         {
             self.AddOrUpdate(key, val, (_, __) => val);
@@ -57,18 +40,6 @@ namespace NuGetGallery
             }
             output.MakeReadOnly();
             return output;
-        }
-
-        public static void MapServiceRoute(
-            this RouteCollection routes,
-            string routeName,
-            string routeUrl,
-            Type serviceType)
-        {
-            var serviceRoute = new ServiceRoute(routeUrl, new DataServiceHostFactory(), serviceType);
-            serviceRoute.Defaults = new RouteValueDictionary { { "serviceType", "odata" } };
-            serviceRoute.Constraints = new RouteValueDictionary { { "serviceType", "odata" } };
-            routes.Add(routeName, serviceRoute);
         }
 
         public static string ToStringOrNull(this object obj)
@@ -100,6 +71,48 @@ namespace NuGetGallery
             return String.Empty;
         }
 
+        public static IEnumerable<PackageDependency> AsPackageDependencyEnumerable(this IEnumerable<PackageDependencyGroup> dependencyGroups)
+        {
+            foreach (var dependencyGroup in dependencyGroups)
+            {
+                if (!dependencyGroup.Packages.Any())
+                {
+                    yield return new PackageDependency
+                    {
+                        Id = null,
+                        VersionSpec = null,
+                        TargetFramework = dependencyGroup.TargetFramework.ToShortNameOrNull()
+                    };
+                }
+                else
+                {
+                    foreach (var dependency in dependencyGroup.Packages.Select(
+                        d => new { d.Id, d.VersionRange, dependencyGroup.TargetFramework }))
+                    {
+                        yield return new PackageDependency
+                        {
+                            Id = dependency.Id,
+                            VersionSpec = dependency.VersionRange?.ToString(),
+                            TargetFramework = dependency.TargetFramework.ToShortNameOrNull()
+                        };
+                    }
+                }
+            }
+        }
+
+        public static IEnumerable<PackageType> AsPackageTypeEnumerable(this IEnumerable<NuGet.Packaging.Core.PackageType> packageTypes)
+        {
+            foreach (var packageType in packageTypes)
+            {
+                yield return new PackageType
+                {
+                    Name = packageType.Name,
+                    Version = packageType.Version.ToString()
+                };
+            }
+
+        }
+
         public static string Flatten(this IEnumerable<string> list)
         {
             if (list == null)
@@ -110,39 +123,15 @@ namespace NuGetGallery
             return String.Join(", ", list.ToArray());
         }
 
-        public static string Flatten(this IEnumerable<PackageDependencySet> dependencySets)
+        public static string Flatten(this IEnumerable<PackageDependencyGroup> dependencyGroups)
         {
-            var dependencies = new List<dynamic>();
+            return FlattenDependencies(
+                AsPackageDependencyEnumerable(dependencyGroups).ToList());
+        }
 
-            foreach (var dependencySet in dependencySets)
-            {
-                if (dependencySet.Dependencies.Count == 0)
-                {
-                    dependencies.Add(
-                        new
-                            {
-                                Id = (string)null,
-                                VersionSpec = (string)null,
-                                TargetFramework =
-                            dependencySet.TargetFramework == null ? null : VersionUtility.GetShortFrameworkName(dependencySet.TargetFramework)
-                            });
-                }
-                else
-                {
-                    foreach (var dependency in dependencySet.Dependencies.Select(d => new { d.Id, d.VersionSpec, dependencySet.TargetFramework }))
-                    {
-                        dependencies.Add(
-                            new
-                                {
-                                    dependency.Id,
-                                    VersionSpec = dependency.VersionSpec == null ? null : dependency.VersionSpec.ToString(),
-                                    TargetFramework =
-                                dependency.TargetFramework == null ? null : VersionUtility.GetShortFrameworkName(dependency.TargetFramework)
-                                });
-                    }
-                }
-            }
-            return FlattenDependencies(dependencies);
+        public static string Flatten(this IEnumerable<PackageType> packageTypes)
+        {
+            return String.Join("|", packageTypes.Select(d => String.Format(CultureInfo.InvariantCulture, "{0}:{1}", d.Name, d.Version)));
         }
 
         public static string Flatten(this ICollection<PackageDependency> dependencies)
@@ -188,63 +177,17 @@ namespace NuGetGallery
             return items.Any(predicate);
         }
 
-        public static bool IsOwner(this Package package, IPrincipal user)
-        {
-            return package.PackageRegistration.IsOwner(user);
-        }
-
-        public static bool IsOwner(this Package package, User user)
-        {
-            return package.PackageRegistration.IsOwner(user);
-        }
-
-        public static bool IsOwner(this PackageRegistration package, IPrincipal user)
-        {
-            if (package == null)
-            {
-                throw new ArgumentNullException("package");
-            }
-            if (user == null || user.Identity == null)
-            {
-                return false;
-            }
-            return user.IsAdministrator() || package.Owners.Any(u => u.Username == user.Identity.Name);
-        }
-
-        public static bool IsOwner(this PackageRegistration package, User user)
-        {
-            if (package == null)
-            {
-                throw new ArgumentNullException("package");
-            }
-            if (user == null)
-            {
-                return false;
-            }
-            return package.Owners.Any(u => u.Key == user.Key);
-        }
-
         // apple polish!
         public static string CardinalityLabel(this int count, string singular, string plural)
         {
             return count == 1 ? singular : plural;
         }
 
-        public static bool IsInThePast(this DateTime? date)
-        {
-            return date.Value.IsInThePast();
-        }
-
-        public static bool IsInThePast(this DateTime date)
-        {
-            return date < DateTime.UtcNow;
-        }
-
         public static IQueryable<T> SortBy<T>(this IQueryable<T> source, string sortExpression)
         {
             if (source == null)
             {
-                throw new ArgumentNullException("source");
+                throw new ArgumentNullException(nameof(source));
             }
 
             int descIndex = sortExpression.IndexOf(" desc", StringComparison.OrdinalIgnoreCase);
@@ -280,67 +223,226 @@ namespace NuGetGallery
             return source.Provider.CreateQuery<T>(methodCallExpression);
         }
 
-        public static MailAddress ToMailAddress(this User user)
-        {
-            return new MailAddress(user.EmailAddress, user.Username);
-        }
-
         public static bool IsError<TModel, TProperty>(this HtmlHelper<TModel> htmlHelper, Expression<Func<TModel, TProperty>> expression)
         {
             var metadata = ModelMetadata.FromLambdaExpression(expression, htmlHelper.ViewData);
-            var modelState = htmlHelper.ViewData.ModelState[metadata.PropertyName];
+            var name = htmlHelper.NameFor(expression).ToString();
+            var modelState = htmlHelper.ViewData.ModelState[name];
             return modelState != null && modelState.Errors != null && modelState.Errors.Count > 0;
         }
 
-        public static string ToShortNameOrNull(this FrameworkName frameworkName)
+        public static HtmlString HasErrorFor<TModel, TProperty>(this HtmlHelper<TModel> htmlHelper, Expression<Func<TModel, TProperty>> expression)
         {
-            return frameworkName == null ? null : VersionUtility.GetShortFrameworkName(frameworkName);
-        }
-
-        public static string ToFriendlyName(this FrameworkName frameworkName)
-        {
-            if (frameworkName == null)
+            if (IsError(htmlHelper, expression))
             {
-                throw new ArgumentNullException("frameworkName");
-            }
-
-            var sb = new StringBuilder();
-            if (String.Equals(frameworkName.Identifier, ".NETPortable", StringComparison.OrdinalIgnoreCase))
-            {
-                sb.Append("Portable Class Library (");
-
-                // Recursively parse the profile
-                var subprofiles = frameworkName.Profile.Split('+');
-                sb.Append(String.Join(", ", subprofiles.Select(s => VersionUtility.ParseFrameworkName(s).ToFriendlyName())));
-                sb.Append(")");
+                return MvcHtmlString.Create("has-error");
             }
             else
             {
-                sb.AppendFormat("{0} {1}", frameworkName.Identifier, frameworkName.Version);
+                return MvcHtmlString.Empty;
+            }
+        }
+
+        public static HtmlString ShowLabelFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
+        {
+            return ShowLabelFor(html, expression, labelText: null);
+        }
+
+        public static HtmlString ShowLabelFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, string labelText)
+        {
+            var metadata = ModelMetadata.FromLambdaExpression(expression, html.ViewData);
+            var propertyName = metadata.PropertyName.ToLower();
+
+            return html.LabelFor(expression, labelText, new
+            {
+                id = $"{propertyName}-label"
+            });
+        }
+
+        public static HtmlString ShowPasswordFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression);
+            htmlAttributes["autocomplete"] = "off";
+            return html.PasswordFor(expression, htmlAttributes);
+        }
+
+        public static HtmlString ShowTextBoxFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, bool enabled = true, string placeholder = null)
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression);
+            if (!enabled)
+            {
+                htmlAttributes.Add("disabled", "true");
+            }
+
+            if (placeholder != null)
+            {
+                htmlAttributes.Add("placeholder", placeholder);
+            }
+
+            return html.TextBoxFor(expression, htmlAttributes);
+        }
+
+        public static HtmlString ShowEmailBoxFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression);
+            htmlAttributes["type"] = "email";
+            return html.TextBoxFor(expression, htmlAttributes);
+        }
+
+        public static HtmlString ShowCheckboxFor<TModel>(this HtmlHelper<TModel> html, Expression<Func<TModel, bool>> expression)
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression, isFormControl: false);
+            return html.CheckBoxFor(expression, htmlAttributes);
+        }
+
+        public static HtmlString ShowTextAreaFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression, int rows, int columns)
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression);
+            return html.TextAreaFor(expression, rows, columns, htmlAttributes);
+        }
+
+        public static MvcHtmlString ShowEnumDropDownListFor<TModel, TEnum>(
+            this HtmlHelper<TModel> html,
+            Expression<Func<TModel, TEnum?>> expression,
+            string emptyItemText)
+          where TEnum : struct
+        {
+            var values = Enum
+                .GetValues(typeof(TEnum))
+                .Cast<TEnum>();
+
+            return ShowEnumDropDownListFor<TModel, TEnum>(html, expression, values, emptyItemText);
+        }
+
+        public static MvcHtmlString ShowEnumDropDownListFor<TModel, TEnum>(
+            this HtmlHelper<TModel> html,
+            Expression<Func<TModel, TEnum?>> expression,
+            IEnumerable<TEnum> values,
+            string emptyItemText)
+          where TEnum : struct
+        {
+            var htmlAttributes = GetHtmlAttributes(html, expression);
+            return html.EnumDropDownListFor(expression, values, emptyItemText, htmlAttributes);
+        }
+
+        private static Dictionary<string, object> GetHtmlAttributes<TModel, TProperty>(
+            HtmlHelper<TModel> html,
+            Expression<Func<TModel, TProperty>> expression,
+            bool isFormControl = true)
+        {
+            var metadata = ModelMetadata.FromLambdaExpression(expression, html.ViewData);
+            var propertyName = metadata.PropertyName.ToLower();
+            var htmlAttributes = new Dictionary<string, object>();
+
+            htmlAttributes["aria-labelledby"] = $"{propertyName}-label {propertyName}-validation-message";
+
+            if (isFormControl)
+            {
+                htmlAttributes["class"] = "form-control";
+            }
+
+            if (metadata.IsRequired)
+            {
+                htmlAttributes["aria-required"] = "true";
+            }
+
+            return htmlAttributes;
+        }
+
+        public static HtmlString ShowValidationMessagesFor<TModel, TProperty>(this HtmlHelper<TModel> html, Expression<Func<TModel, TProperty>> expression)
+        {
+            var metadata = ModelMetadata.FromLambdaExpression(expression, html.ViewData);
+            var propertyName = metadata.PropertyName.ToLower();
+
+            return html.ValidationMessageFor(expression, validationMessage: null, htmlAttributes: new Dictionary<string, object>(ValidationHtmlAttributes)
+            {
+                { "id", $"{propertyName}-validation-message" },
+            });
+        }
+
+        public static MvcHtmlString ShowValidationMessagesForEmpty(this HtmlHelper html)
+        {
+            return html.ValidationMessage(modelName: string.Empty, htmlAttributes: ValidationHtmlAttributes);
+        }
+
+        private static IDictionary<string, object> ValidationHtmlAttributes = new Dictionary<string, object>
+        {
+            { "class", "help-block" },
+            { "role", "alert" },
+            { "aria-live", "assertive" },
+        };
+
+        public static string ToShortNameOrNull(this NuGetFramework frameworkName)
+        {
+            if (frameworkName == null)
+            {
+                return null;
+            }
+
+            var shortFolderName = frameworkName.GetShortFolderName();
+
+            // If the shortFolderName is "any", we want to return null to preserve NuGet.Core
+            // compatibility in the V2 feed.
+            if (String.Equals(shortFolderName, "any", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return shortFolderName;
+        }
+
+        public static string ToFriendlyName(this NuGetFramework frameworkName, bool allowRecurseProfile = true)
+        {
+            if (frameworkName == null)
+            {
+                throw new ArgumentNullException(nameof(frameworkName));
+            }
+
+            var sb = new StringBuilder();
+            if (String.Equals(frameworkName.Framework, ".NETPortable", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.Append("Portable Class Library");
+
+                // Recursively parse the profile
+                if (allowRecurseProfile)
+                {
+                    sb.Append(" (");
+
+                    var profiles = frameworkName.GetShortFolderName()
+                        .Replace("portable-", string.Empty)
+                        .Replace("portable40-", string.Empty)
+                        .Replace("portable45-", string.Empty)
+                        .Split('+');
+
+                    sb.Append(String.Join(", ",
+                        profiles.Select(s => NuGetFramework.Parse(s).ToFriendlyName(allowRecurseProfile: false))));
+
+                    sb.Append(")");
+                }
+            }
+            else
+            {
+                string version = null;
+                if (frameworkName.Version.Build == 0)
+                {
+                    version = frameworkName.Version.ToString(2);
+                }
+                else if (frameworkName.Version.Revision == 0)
+                {
+                    version = frameworkName.Version.ToString(3);
+                }
+                else
+                {
+                    version = frameworkName.Version.ToString();
+                }
+
+                sb.AppendFormat("{0} {1}", frameworkName.Framework, version);
                 if (!String.IsNullOrEmpty(frameworkName.Profile))
                 {
                     sb.AppendFormat(" {0}", frameworkName.Profile);
                 }
             }
             return sb.ToString();
-        }
-
-        public static string GetClaimOrDefault(this ClaimsPrincipal self, string claimType)
-        {
-            return self.Claims.GetClaimOrDefault(claimType);
-        }
-
-        public static string GetClaimOrDefault(this ClaimsIdentity self, string claimType)
-        {
-            return self.Claims.GetClaimOrDefault(claimType);
-        }
-
-        public static string GetClaimOrDefault(this IEnumerable<Claim> self, string claimType)
-        {
-            return self
-                .Where(c => String.Equals(c.Type, claimType, StringComparison.OrdinalIgnoreCase))
-                .Select(c => c.Value)
-                .FirstOrDefault();
         }
 
         // This is a method because the first call will perform a database call
@@ -353,14 +455,15 @@ namespace NuGetGallery
         /// <returns>The current user</returns>
         public static User GetCurrentUser(this IOwinContext self)
         {
-            if (self.Request.User == null)
+            if (self.Request.User == null || 
+                (self.Request.User.Identity != null && !self.Request.User.Identity.IsAuthenticated))
             {
                 return null;
             }
 
             User user = null;
             object obj;
-            if (self.Environment.TryGetValue(Constants.CurrentUserOwinEnvironmentKey, out obj))
+            if (self.Environment.TryGetValue(GalleryConstants.CurrentUserOwinEnvironmentKey, out obj))
             {
                 user = obj as User;
             }
@@ -368,7 +471,7 @@ namespace NuGetGallery
             if (user == null)
             {
                 user = LoadUser(self);
-                self.Environment[Constants.CurrentUserOwinEnvironmentKey] = user;
+                self.Environment[GalleryConstants.CurrentUserOwinEnvironmentKey] = user;
             }
 
             if (user == null)
@@ -381,6 +484,57 @@ namespace NuGetGallery
             return user;
         }
 
+        /// <summary>
+        /// This method will add the claim to the OwinContext with default value and update the cookie with the updated claims
+        /// </summary>
+        /// <returns>True if successfully adds the claim to the context, false otherwise</returns>
+        public static bool AddClaim(this IOwinContext self, string claimType, string claimValue = null)
+        {
+            var identity = GetIdentity(self);
+            if (identity == null || !identity.IsAuthenticated)
+            {
+                return false;
+            }
+
+            if (identity.TryAddClaim(claimType, claimValue))
+            {
+                // Update the cookies for the newly added claim
+                self.Authentication.AuthenticationResponseGrant = new AuthenticationResponseGrant(new ClaimsPrincipal(identity), new AuthenticationProperties() { IsPersistent = true });
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// This method will remove the claim from the OwinContext and update the cookie with the updated claims
+        /// </summary>
+        /// <returns>True if successfully removed the claim from context, false otherwise</returns>
+        public static bool RemoveClaim(this IOwinContext self, string claimType)
+        {
+            var identity = GetIdentity(self);
+            if (identity == null || !identity.IsAuthenticated)
+            {
+                return false;
+            }
+
+            if (identity.TryRemoveClaim(claimType))
+            {
+                // Update the cookies for the removed claim
+                self.Authentication.AuthenticationResponseGrant = new AuthenticationResponseGrant(new ClaimsPrincipal(identity), new AuthenticationProperties() { IsPersistent = true });
+                return true;
+            }
+
+            return false;
+        }
+
+        private static IIdentity GetIdentity(IOwinContext context)
+        {
+            var responseGrantIdentity = context.Authentication?.AuthenticationResponseGrant?.Identity;
+            var authenticatedUserIdentity = context.Authentication?.User?.Identity;
+            return responseGrantIdentity ?? authenticatedUserIdentity;
+        }
+
         private static User LoadUser(IOwinContext context)
         {
             var principal = context.Authentication.User;
@@ -391,9 +545,8 @@ namespace NuGetGallery
 
                 if (!String.IsNullOrEmpty(userName))
                 {
-                    return DependencyResolver
-                        .Current
-                        .GetService<UserService>()
+                    return DependencyResolver.Current
+                        .GetService<IUserService>()
                         .FindByUsername(userName);
                 }
             }

@@ -1,27 +1,25 @@
-﻿using System.Web.Mvc;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System.Web.Mvc;
+using Autofac.Features.Indexed;
+using NuGet.Services.Sql;
 using NuGetGallery.Areas.Admin.DynamicData;
-using Ninject;
-using NuGetGallery.Configuration;
 
 namespace NuGetGallery.Areas.Admin
 {
     public class AdminAreaRegistration : AreaRegistration
     {
-        public override string AreaName
-        {
-            get
-            {
-                return "Admin";
-            }
-        }
+        public const string Name = "Admin";
+
+        public override string AreaName => Name;
 
         public override void RegisterArea(AreaRegistrationContext context)
         {
-            var config = Container.Kernel.Get<IAppConfiguration>();
+            var galleryDbConnectionFactory = DependencyResolver.Current.GetService<ISqlConnectionFactory>();
 
             context.Routes.Ignore("Admin/Errors.axd/{*pathInfo}"); // ELMAH owns this root
-            context.Routes.Ignore("Admin/Glimpse/{*pathInfo}"); // Glimpse owns this root
-            DynamicDataManager.Register(context.Routes, "Admin/Database", config);
+            DynamicDataManager.Register(context.Routes, "Admin/Database", galleryDbConnectionFactory);
 
             context.MapRoute(
                 "Admin_default",

@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -23,7 +25,7 @@ namespace NuGetGallery
             Assert.Equal(expectedLocation, context.Response.Headers["Location"]);
         }
 
-        public static void SetsCookie(IOwinResponse response, string name, string expectedValue)
+        public static void SetsCookie(IOwinResponse response, string name, string expectedValue, bool secure = true)
         {
             // Get the cookie
             var cookie = GetCookie(response, name);
@@ -31,6 +33,12 @@ namespace NuGetGallery
             // Check the value
             Assert.NotNull(cookie);
             Assert.Equal(expectedValue, cookie.Value);
+
+            // Check cookie attributes
+            var header = response.Headers["Set-Cookie"];
+            Assert.True(!String.IsNullOrEmpty(header));
+            Assert.True(header.IndexOf("HttpOnly", StringComparison.OrdinalIgnoreCase) > 0);
+            Assert.Equal(secure, header.IndexOf("Secure", StringComparison.OrdinalIgnoreCase) > 0);
         }
 
         public static void DeletesCookie(IOwinResponse response, string name)

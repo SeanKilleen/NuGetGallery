@@ -1,6 +1,11 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage;
 using Newtonsoft.Json;
@@ -10,132 +15,187 @@ namespace NuGetGallery
 {
     public class JsonStatisticsService : IStatisticsService
     {
-        private enum Reports
-        {
-            RecentPopularity,           //  most frequently downloaded package registration in last 6 weeks
-            RecentPopularityDetail,     //  most frequently downloaded package, specific to actual version
-            RecentPopularityDetail_,    //  breakout by version for a package (drill down from RecentPopularity) 
-            NuGetClientVersion,         //  downloads that have been done by the various NuGet client versions 
-            Last6Months                 //  downloads per month
-        };
+        private const string RecentPopularityDetailBlobNameFormat = "recentpopularity/{0}{1}.json";
 
-        private IReportService _reportService;
-        private List<StatisticsPackagesItemViewModel> _downloadPackagesSummary;
-        private List<StatisticsPackagesItemViewModel> _downloadPackageVersionsSummary;
-        private List<StatisticsPackagesItemViewModel> _downloadPackagesAll;
-        private List<StatisticsPackagesItemViewModel> _downloadPackageVersionsAll;
-        private List<StatisticsNuGetUsageItem> _nuGetClientVersion;
-        private List<StatisticsMonthlyUsageItem> _last6Months;
+        /// <summary>
+        /// How often statistics reports should be refreshed using the <see cref="_reportService"/>.
+        /// </summary>
+        private readonly TimeSpan _refreshInterval = TimeSpan.FromHours(1);
+
+        /// <summary>
+        /// The last time the reports were loaded, or null.
+        /// </summary>
+        private DateTime? _lastRefresh = null;
+
+        /// <summary>
+        /// The service used to load reports in the form of JSON blobs.
+        /// </summary>
+        private readonly IReportService _reportService;
+
+        /// <summary>
+        /// The semaphore used to update the statistics service's reports.
+        /// </summary>
+        private readonly SemaphoreSlim _reportSemaphore = new SemaphoreSlim(initialCount: 1, maxCount: 1);
+
+        private readonly List<StatisticsPackagesItemViewModel> _packageDownloads = new List<StatisticsPackagesItemViewModel>();
+        private readonly List<StatisticsPackagesItemViewModel> _packageDownloadsSummary = new List<StatisticsPackagesItemViewModel>();
+
+        private readonly List<StatisticsPackagesItemViewModel> _packageVersionDownloads = new List<StatisticsPackagesItemViewModel>();
+        private readonly List<StatisticsPackagesItemViewModel> _packageVersionDownloadsSummary = new List<StatisticsPackagesItemViewModel>();
+
+        private readonly List<StatisticsPackagesItemViewModel> _communityPackageDownloads = new List<StatisticsPackagesItemViewModel>();
+        private readonly List<StatisticsPackagesItemViewModel> _communityPackageDownloadsSummary = new List<StatisticsPackagesItemViewModel>();
+
+        private readonly List<StatisticsPackagesItemViewModel> _communityPackageVersionDownloads = new List<StatisticsPackagesItemViewModel>();
+        private readonly List<StatisticsPackagesItemViewModel> _communityPackageVersionDownloadsSummary = new List<StatisticsPackagesItemViewModel>();
+
+        private readonly List<StatisticsNuGetUsageItem> _nuGetClientVersion = new List<StatisticsNuGetUsageItem>();
+        private readonly List<StatisticsWeeklyUsageItem> _last6Weeks = new List<StatisticsWeeklyUsageItem>();
 
         public JsonStatisticsService(IReportService reportService)
         {
             _reportService = reportService;
         }
 
-        public IEnumerable<StatisticsPackagesItemViewModel> DownloadPackagesSummary 
+        public StatisticsReportResult PackageDownloadsResult { get; private set; }
+        public IEnumerable<StatisticsPackagesItemViewModel> PackageDownloads => _packageDownloads;
+        public IEnumerable<StatisticsPackagesItemViewModel> PackageDownloadsSummary => _packageDownloadsSummary;
+
+        public StatisticsReportResult PackageVersionDownloadsResult { get; private set; }
+        public IEnumerable<StatisticsPackagesItemViewModel> PackageVersionDownloads => _packageVersionDownloads;
+        public IEnumerable<StatisticsPackagesItemViewModel> PackageVersionDownloadsSummary => _packageVersionDownloadsSummary;
+
+        public StatisticsReportResult CommunityPackageDownloadsResult { get; private set; }
+        public IEnumerable<StatisticsPackagesItemViewModel> CommunityPackageDownloads => _communityPackageDownloads;
+        public IEnumerable<StatisticsPackagesItemViewModel> CommunityPackageDownloadsSummary => _communityPackageDownloadsSummary;
+
+        public StatisticsReportResult CommunityPackageVersionDownloadsResult { get; private set; }
+        public IEnumerable<StatisticsPackagesItemViewModel> CommunityPackageVersionDownloads => _communityPackageVersionDownloads;
+        public IEnumerable<StatisticsPackagesItemViewModel> CommunityPackageVersionDownloadsSummary => _communityPackageVersionDownloadsSummary;
+
+        public StatisticsReportResult NuGetClientVersionResult { get; private set; }
+        public IEnumerable<StatisticsNuGetUsageItem> NuGetClientVersion => _nuGetClientVersion;
+
+        public StatisticsReportResult Last6WeeksResult { get; private set; }
+        public IEnumerable<StatisticsWeeklyUsageItem> Last6Weeks => _last6Weeks;
+
+        /// <summary>
+        /// The time that the reports were generated, or null if the reports have not been loaded.
+        /// </summary>
+        public DateTime? LastUpdatedUtc { get; private set; } = null;
+
+        /// <summary>
+        /// Refresh or load the statistics service's reports. No-ops if <see cref="_lastRefresh"/>
+        /// is within <see cref="_refreshInterval"/>.
+        /// </summary>
+        /// <returns>A task that completes when the reports have finished.</returns>
+        public async Task Refresh()
         {
-            get
+            if (!ShouldRefresh())
             {
-                if (_downloadPackagesSummary == null)
+                return;
+            }
+
+            await _reportSemaphore.WaitAsync();
+
+            try
+            {
+                if (!ShouldRefresh())
                 {
-                    _downloadPackagesSummary = new List<StatisticsPackagesItemViewModel>();
+                    return;
                 }
-                return _downloadPackagesSummary;
+
+                var availablity = await Task.WhenAll(
+                    LoadDownloadPackages(),
+                    LoadDownloadPackageVersions(),
+                    LoadDownloadCommunityPackages(),
+                    LoadDownloadCommunityPackageVersions(),
+                    LoadNuGetClientVersion(),
+                    LoadLast6Weeks());
+
+                PackageDownloadsResult = availablity[0];
+                PackageVersionDownloadsResult = availablity[1];
+                CommunityPackageDownloadsResult = availablity[2];
+                CommunityPackageVersionDownloadsResult = availablity[3];
+                NuGetClientVersionResult = availablity[4];
+                Last6WeeksResult = availablity[5];
+
+                LastUpdatedUtc = availablity
+                    .Where(r => r.LastUpdatedUtc.HasValue)
+                    .OrderByDescending(r => r.LastUpdatedUtc.Value)
+                    .Select(r => r.LastUpdatedUtc)
+                    .FirstOrDefault();
+
+                _lastRefresh = DateTime.UtcNow;
+            }
+            finally
+            {
+                _reportSemaphore.Release();
             }
         }
 
-        public IEnumerable<StatisticsPackagesItemViewModel> DownloadPackageVersionsSummary
+        private bool ShouldRefresh()
         {
-            get
+            // The reports should be refreshed if they have never been loaded, or, if
+            // the reports are stale and have reached the refresh interval.
+            if (!_lastRefresh.HasValue)
             {
-                if (_downloadPackageVersionsSummary == null)
-                {
-                    _downloadPackageVersionsSummary = new List<StatisticsPackagesItemViewModel>();
-                }
-                return _downloadPackageVersionsSummary;
+                return true;
             }
+
+            return (_lastRefresh - DateTime.UtcNow) >= _refreshInterval;
         }
 
-        public IEnumerable<StatisticsPackagesItemViewModel> DownloadPackagesAll
+        private Task<StatisticsReportResult> LoadDownloadPackages()
         {
-            get
-            {
-                if (_downloadPackagesAll == null)
-                {
-                    _downloadPackagesAll = new List<StatisticsPackagesItemViewModel>();
-                }
-                return _downloadPackagesAll;
-            }
+            return LoadDownloadPackages(
+                StatisticsReportName.RecentPopularity,
+                _packageDownloads,
+                _packageDownloadsSummary);
         }
 
-        public IEnumerable<StatisticsPackagesItemViewModel> DownloadPackageVersionsAll
+        private Task<StatisticsReportResult> LoadDownloadCommunityPackages()
         {
-            get
-            {
-                if (_downloadPackageVersionsAll == null)
-                {
-                    _downloadPackageVersionsAll = new List<StatisticsPackagesItemViewModel>();
-                }
-                return _downloadPackageVersionsAll;
-            }
+            return LoadDownloadPackages(
+                StatisticsReportName.RecentCommunityPopularity,
+                _communityPackageDownloads,
+                _communityPackageDownloadsSummary);
         }
 
-        public IEnumerable<StatisticsNuGetUsageItem> NuGetClientVersion
-        { 
-            get 
-            {
-                if (_nuGetClientVersion == null)
-                {
-                    _nuGetClientVersion = new List<StatisticsNuGetUsageItem>();
-                }
-                return _nuGetClientVersion;
-            }
-        }
-
-        public IEnumerable<StatisticsMonthlyUsageItem> Last6Months
-        { 
-            get
-            {
-                if (_last6Months == null)
-                {
-                    _last6Months = new List<StatisticsMonthlyUsageItem>();
-                }
-                return _last6Months;
-            }
-        }
-
-        public async Task<StatisticsReportResult> LoadDownloadPackages()
+        /// <summary>
+        /// Load a package downloads report.
+        /// </summary>
+        /// <param name="statisticsReportName">The name of the report to load.</param>
+        /// <param name="packagesAll">The model that should be hydrated with the report.</param>
+        /// <param name="packagesSummary">The model that should be hydrated with the summary of the report.</param>
+        /// <returns>The result of loading the report.</returns>
+        private async Task<StatisticsReportResult> LoadDownloadPackages(
+            StatisticsReportName statisticsReportName,
+            List<StatisticsPackagesItemViewModel> packagesAll,
+            List<StatisticsPackagesItemViewModel> packagesSummary)
         {
             try
             {
-                var reportContent = await _reportService.Load(Reports.RecentPopularity.ToString() + ".json");
-
+                var reportName = (statisticsReportName + ".json").ToLowerInvariant();
+                var reportContent = await _reportService.Load(reportName);
                 if (reportContent == null)
                 {
                     return StatisticsReportResult.Failed;
                 }
 
-                JArray array = JArray.Parse(reportContent.Content);
-
-                ((List<StatisticsPackagesItemViewModel>)DownloadPackagesAll).Clear();
-
-                foreach (JObject item in array)
-                {
-                    ((List<StatisticsPackagesItemViewModel>)DownloadPackagesAll).Add(new StatisticsPackagesItemViewModel
+                var results = JArray.Parse(reportContent.Content).Select(item =>
+                    new StatisticsPackagesItemViewModel
                     {
                         PackageId = item["PackageId"].ToString(),
                         Downloads = item["Downloads"].Value<int>()
-                    });
-                }
+                    }
+                );
 
-                int count = ((List<StatisticsPackagesItemViewModel>)DownloadPackagesAll).Count;
+                packagesAll.Clear();
+                packagesAll.AddRange(results);
 
-                ((List<StatisticsPackagesItemViewModel>)DownloadPackagesSummary).Clear();
-
-                for (int i = 0; i < Math.Min(10, count); i++)
-                {
-                    ((List<StatisticsPackagesItemViewModel>)DownloadPackagesSummary).Add(((List<StatisticsPackagesItemViewModel>)DownloadPackagesAll)[i]);
-                }
+                packagesSummary.Clear();
+                packagesSummary.AddRange(packagesAll.Take(10));
 
                 return StatisticsReportResult.Success(reportContent.LastUpdatedUtc);
             }
@@ -146,42 +206,56 @@ namespace NuGetGallery
             }
         }
 
-        public async Task<StatisticsReportResult> LoadDownloadPackageVersions()
+        private Task<StatisticsReportResult> LoadDownloadPackageVersions()
+        {
+            return LoadDownloadPackageVersions(
+                StatisticsReportName.RecentPopularityDetail,
+                _packageVersionDownloads,
+                _packageVersionDownloadsSummary);
+        }
+
+        private Task<StatisticsReportResult> LoadDownloadCommunityPackageVersions()
+        {
+            return LoadDownloadPackageVersions(
+                StatisticsReportName.RecentCommunityPopularityDetail,
+                _communityPackageVersionDownloads,
+                _communityPackageVersionDownloadsSummary);
+        }
+
+        /// <summary>
+        /// Load a package version downloads report.
+        /// </summary>
+        /// <param name="statisticsReportName">The name of the report to load.</param>
+        /// <param name="packageVersionsAll">The model that should be hydrated with the report.</param>
+        /// <returns>The result of loading the report.</returns>
+        private async Task<StatisticsReportResult> LoadDownloadPackageVersions(
+            StatisticsReportName statisticsReportName,
+            List<StatisticsPackagesItemViewModel> packageVersionsAll,
+            List<StatisticsPackagesItemViewModel> packageVersionsSummary)
         {
             try
             {
-                var reportContent = await _reportService.Load(Reports.RecentPopularityDetail.ToString() + ".json");
-
+                var reportName = (statisticsReportName + ".json").ToLowerInvariant();
+                var reportContent = await _reportService.Load(reportName);
                 if (reportContent == null)
                 {
                     return StatisticsReportResult.Failed;
                 }
 
-                JArray array = JArray.Parse(reportContent.Content);
-
-                ((List<StatisticsPackagesItemViewModel>)DownloadPackageVersionsAll).Clear();
-
-                foreach (JObject item in array)
-                {
-                    ((List<StatisticsPackagesItemViewModel>)DownloadPackageVersionsAll).Add(new StatisticsPackagesItemViewModel
+                var results = JArray.Parse(reportContent.Content).Select(item =>
+                    new StatisticsPackagesItemViewModel
                     {
                         PackageId = item["PackageId"].ToString(),
                         PackageVersion = item["PackageVersion"].ToString(),
                         Downloads = item["Downloads"].Value<int>(),
-                        PackageTitle = GetOptionalProperty("PackageTitle", item),
-                        PackageDescription = GetOptionalProperty("PackageDescription", item),
-                        PackageIconUrl = GetOptionalProperty("PackageIconUrl", item)
-                    });
-                }
+                    }
+                );
 
-                int count = ((List<StatisticsPackagesItemViewModel>)DownloadPackageVersionsAll).Count;
+                packageVersionsAll.Clear();
+                packageVersionsAll.AddRange(results);
 
-                ((List<StatisticsPackagesItemViewModel>)DownloadPackageVersionsSummary).Clear();
-
-                for (int i = 0; i < Math.Min(10, count); i++)
-                {
-                    ((List<StatisticsPackagesItemViewModel>)DownloadPackageVersionsSummary).Add(((List<StatisticsPackagesItemViewModel>)DownloadPackageVersionsAll)[i]);
-                }
+                packageVersionsSummary.Clear();
+                packageVersionsSummary.AddRange(packageVersionsAll.Take(10));
 
                 return StatisticsReportResult.Success(reportContent.LastUpdatedUtc);
             }
@@ -192,27 +266,27 @@ namespace NuGetGallery
             }
         }
 
-        public async Task<StatisticsReportResult> LoadNuGetClientVersion()
+        private async Task<StatisticsReportResult> LoadNuGetClientVersion()
         {
             try
             {
-                var reportContent = await _reportService.Load(Reports.NuGetClientVersion.ToString() + ".json");
-
+                var reportName = (StatisticsReportName.NuGetClientVersion + ".json").ToLowerInvariant();
+                var reportContent = await _reportService.Load(reportName);
                 if (reportContent == null)
                 {
                     return StatisticsReportResult.Failed;
                 }
 
-                JArray array = JArray.Parse(reportContent.Content);
-
-                ((List<StatisticsNuGetUsageItem>)NuGetClientVersion).Clear();
+                var array = JArray.Parse(reportContent.Content);
+                var statisticsNuGetUsageItems = (List<StatisticsNuGetUsageItem>)NuGetClientVersion;
+                statisticsNuGetUsageItems.Clear();
 
                 foreach (JObject item in array)
                 {
-                    ((List<StatisticsNuGetUsageItem>)NuGetClientVersion).Add(
+                    statisticsNuGetUsageItems.Add(
                         new StatisticsNuGetUsageItem
                         {
-                            Version = string.Format("{0}.{1}", item["ClientMajorVersion"], item["ClientMinorVersion"]),
+                            Version = string.Format(CultureInfo.InvariantCulture, "{0}.{1}", item["Major"], item["Minor"]),
                             Downloads = (int)item["Downloads"]
                         });
                 }
@@ -226,28 +300,28 @@ namespace NuGetGallery
             }
         }
 
-        public async Task<StatisticsReportResult> LoadLast6Months()
+        private async Task<StatisticsReportResult> LoadLast6Weeks()
         {
             try
             {
-                var reportContent = await _reportService.Load(Reports.Last6Months.ToString() + ".json");
-
+                var reportName = (StatisticsReportName.Last6Weeks + ".json").ToLowerInvariant();
+                var reportContent = await _reportService.Load(reportName);
                 if (reportContent == null)
                 {
                     return StatisticsReportResult.Failed;
                 }
 
-                JArray array = JArray.Parse(reportContent.Content);
-
-                ((List<StatisticsMonthlyUsageItem>)Last6Months).Clear();
+                var array = JArray.Parse(reportContent.Content);
+                var statisticsMonthlyUsageItems = (List<StatisticsWeeklyUsageItem>)Last6Weeks;
+                statisticsMonthlyUsageItems.Clear();
 
                 foreach (JObject item in array)
                 {
-                    ((List<StatisticsMonthlyUsageItem>)Last6Months).Add(
-                        new StatisticsMonthlyUsageItem
+                    statisticsMonthlyUsageItems.Add(
+                        new StatisticsWeeklyUsageItem
                         {
                             Year = (int)item["Year"],
-                            MonthOfYear = (int)item["MonthOfYear"],
+                            WeekOfYear = (int)item["WeekOfYear"],
                             Downloads = (int)item["Downloads"]
                         });
                 }
@@ -259,16 +333,6 @@ namespace NuGetGallery
                 QuietLog.LogHandledException(e);
                 return StatisticsReportResult.Failed;
             }
-        }
-
-        private static string GetOptionalProperty(string propertyName, JObject obj)
-        {
-            JToken token;
-            if (obj.TryGetValue(propertyName, out token))
-            {
-                return token.ToString();
-            }
-            return null;
         }
 
         public async Task<StatisticsPackagesReport> GetPackageDownloadsByVersion(string packageId)
@@ -280,10 +344,8 @@ namespace NuGetGallery
                     return null;
                 }
 
-                string reportName = string.Format(CultureInfo.CurrentCulture, "{0}{1}.json", Reports.RecentPopularityDetail_, packageId);
-
-                reportName = reportName.ToLowerInvariant();
-
+                var reportName = string.Format(CultureInfo.CurrentCulture, RecentPopularityDetailBlobNameFormat,
+                    StatisticsReportName.RecentPopularityDetail_, packageId).ToLowerInvariant();
                 var reportContent = await _reportService.Load(reportName);
 
                 if (reportContent == null)
@@ -291,9 +353,8 @@ namespace NuGetGallery
                     return null;
                 }
 
-                JObject content = JObject.Parse(reportContent.Content);
-
-                StatisticsPackagesReport report = new StatisticsPackagesReport()
+                var content = JObject.Parse(reportContent.Content);
+                var report = new StatisticsPackagesReport
                 {
                     LastUpdatedUtc = reportContent.LastUpdatedUtc
                 };
@@ -304,7 +365,7 @@ namespace NuGetGallery
             }
             catch (StatisticsReportNotFoundException)
             {
-                //do no logging and just return null. Since this exception will thrown for all packages which doesn't have downloads in last 6 weeks, we don't 
+                //do no logging and just return null. Since this exception will thrown for all packages which doesn't have downloads in last 6 weeks, we don't
                 //want to flood the elmah logs.
                 return null;
             }
@@ -319,7 +380,7 @@ namespace NuGetGallery
                 return null;
             }
             catch (StorageException e)
-            {                
+            {
                 QuietLog.LogHandledException(e);
                 return null;
             }
@@ -339,27 +400,22 @@ namespace NuGetGallery
                     return null;
                 }
 
-                string reportName = string.Format(CultureInfo.CurrentCulture, "{0}{1}.json", Reports.RecentPopularityDetail_, packageId);
-
-                reportName = reportName.ToLowerInvariant();
-
+                var reportName = string.Format(CultureInfo.CurrentCulture, RecentPopularityDetailBlobNameFormat,
+                    StatisticsReportName.RecentPopularityDetail_, packageId).ToLowerInvariant();
                 var reportContent = await _reportService.Load(reportName);
-
                 if (reportContent == null)
                 {
                     return null;
                 }
 
-                JObject content = JObject.Parse(reportContent.Content);
-
-                StatisticsPackagesReport report = new StatisticsPackagesReport()
+                var content = JObject.Parse(reportContent.Content);
+                var report = new StatisticsPackagesReport
                 {
                     LastUpdatedUtc = reportContent.LastUpdatedUtc
                 };
 
-                IList<StatisticsFact> facts = new List<StatisticsFact>();
-
-                foreach (StatisticsFact fact in CreateFacts(content))
+                var facts = new List<StatisticsFact>();
+                foreach (var fact in CreateFacts(content))
                 {
                     if (fact.Dimensions["Version"] == packageVersion)
                     {
@@ -396,8 +452,9 @@ namespace NuGetGallery
         private static IList<StatisticsFact> CreateFacts(JObject data)
         {
             IList<StatisticsFact> facts = new List<StatisticsFact>();
-            JToken itemsToken = null;
-            //check if the "Items" exist before trying to access them.
+            JToken itemsToken;
+
+            // Check if the "Items" exist before trying to access them.
             if (!data.TryGetValue("Items", out itemsToken))
             {
                 throw new StatisticsReportNotFoundException();
@@ -408,10 +465,9 @@ namespace NuGetGallery
 
                 foreach (JObject perClient in perVersion["Items"])
                 {
-                    string clientName = (string)perClient["ClientName"];
-                    string clientVersion = (string)perClient["ClientVersion"];
-
-                    string operation = "unknown";
+                    var clientName = (string)perClient["ClientName"];
+                    var clientVersion = (string)perClient["ClientVersion"];
+                    var operation = "unknown";
 
                     JToken opt;
                     if (perClient.TryGetValue("Operation", out opt))
@@ -419,19 +475,19 @@ namespace NuGetGallery
                         operation = (string)opt;
                     }
 
-                    int downloads = (int)perClient["Downloads"];
+                    var downloads = (int)perClient["Downloads"];
 
                     facts.Add(new StatisticsFact(CreateDimensions(version, clientName, clientVersion, operation), downloads));
                 }
             }
-            
+
             return facts;
         }
 
         private static IDictionary<string, string> CreateDimensions(string version, string clientName, string clientVersion, string operation)
         {
-            return new Dictionary<string, string> 
-            { 
+            return new Dictionary<string, string>
+            {
                 { "Version", version },
                 { "ClientName", clientName },
                 { "ClientVersion", clientVersion },

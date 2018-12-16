@@ -1,7 +1,8 @@
-﻿
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 
 //  The implementation here is generic with respect to the specific properties in the data
 //  if can produce any pivot from any data. The result of the pivot is a 2-d array because
@@ -13,7 +14,7 @@ namespace NuGetGallery
 {
     public class StatisticsPivot
     {
-        public static Tuple<TableEntry[][], string> GroupBy(IList<StatisticsFact> facts, string[] pivot, CultureInfo clientCulture)
+        public static Tuple<TableEntry[][], int> GroupBy(IList<StatisticsFact> facts, string[] pivot)
         {
             // Firstly take the facts and the pivot vector and produce a tree structure
 
@@ -33,9 +34,9 @@ namespace NuGetGallery
                 table[i] = new TableEntry[pivot.Length + 1];
             }
 
-            PopulateTable(level, table, clientCulture);
+            PopulateTable(level, table);
 
-            return new Tuple<TableEntry[][], string>(table, level.Total.ToString("n0", clientCulture));
+            return new Tuple<TableEntry[][], int>(table, level.Total);
         }
 
         private static void AddOrderedNext(Level level)
@@ -53,28 +54,28 @@ namespace NuGetGallery
             }
         }
 
-        private static void InnerPopulateTable(Level level, TableEntry[][] table, ref int row, int col, CultureInfo clientCulture)
+        private static void InnerPopulateTable(Level level, TableEntry[][] table, ref int row, int col)
         {
             foreach (KeyValuePair<string, Level> item in level.OrderedNext)
             {
                 if (item.Value.Next == null)
                 {
                     table[row][col] = new TableEntry { Data = item.Key };
-                    table[row][col + 1] = new TableEntry { Data = item.Value.Amount.ToString("n0", clientCulture), IsNumeric = true };
+                    table[row][col + 1] = new TableEntry { Data = item.Value.Amount.ToString(), IsNumeric = true };
                     row++;
                 }
                 else
                 {
                     table[row][col] = new TableEntry { Data = item.Key, Rowspan = item.Value.Count };
-                    InnerPopulateTable(item.Value, table, ref row, col + 1, clientCulture);
+                    InnerPopulateTable(item.Value, table, ref row, col + 1);
                 }
             }
         }
 
-        private static void PopulateTable(Level level, TableEntry[][] table, CultureInfo clientCulture)
+        private static void PopulateTable(Level level, TableEntry[][] table)
         {
             int row = 0;
-            InnerPopulateTable(level, table, ref row, 0, clientCulture);
+            InnerPopulateTable(level, table, ref row, 0);
         }
 
         private static Level InnerGroupBy(IList<StatisticsFact> facts, string[] groupBy)
@@ -135,7 +136,7 @@ namespace NuGetGallery
             }
         }
 
-        // The count in the tree is the count of values. It is equivallent to the count of rows if we
+        // The count in the tree is the count of values. It is equivalent to the count of rows if we
         // were to represent this in a table.
 
         private static int Count(Level level)
@@ -197,7 +198,7 @@ namespace NuGetGallery
         // This is for an internal data structure that represents the pivot as a tree.
         // An instance of a Level is a node in that tree. The Level can either contain
         // a dictionary of next Levels or an Amount. If Next is null then the Amount is valid
-        // and the Level is a leaf node in the tree. The Count and Total fields are calculated 
+        // and the Level is a leaf node in the tree. The Count and Total fields are calculated
         // and added to the tree after it has been constructed. They are correct with respect
         // to their subtree. The Count is useful for formatting RowSpan in HTML tables.
 
@@ -222,7 +223,7 @@ namespace NuGetGallery
 
             public int Count { get; set; }
 
-            // Total is the sum Total of all the Amounts in all the decendents. (See Total function above.)
+            // Total is the sum Total of all the Amounts in all the descendants. (See Total function above.)
 
             public int Total { get; set; }
 

@@ -1,4 +1,6 @@
-﻿using System.Web.Mvc;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System.Web.Mvc;
 
 namespace NuGetGallery.Infrastructure
 {
@@ -14,7 +16,7 @@ namespace NuGetGallery.Infrastructure
 
                 context.Result = new ViewResult
                 {
-                    ViewName = "~/Views/Errors/CookieError.cshtml",
+                    ViewName = "~/Views/Errors/BadRequest.cshtml",
                 };
 
                 context.ExceptionHandled = true;

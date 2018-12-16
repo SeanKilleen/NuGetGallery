@@ -1,16 +1,35 @@
-﻿using System.Data.Entity;
-using System.Data.Entity.Infrastructure;
-using System.Diagnostics;
-using System.Web.Configuration;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Data.Common;
+using System.Data.Entity;
+using System.Data.Entity.Infrastructure.Annotations;
+using System.Threading.Tasks;
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
-    public class EntitiesContext : DbContext, IEntitiesContext
+    [DbConfigurationType(typeof(EntitiesConfiguration))]
+    public class EntitiesContext
+        : ObjectMaterializedInterceptingDbContext, IEntitiesContext
     {
+        private const string CertificatesThumbprintIndex = "IX_Certificates_Thumbprint";
+
         static EntitiesContext()
         {
             // Don't run migrations, ever!
             Database.SetInitializer<EntitiesContext>(null);
+        }
+
+        /// <summary>
+        /// This constructor is provided mainly for purposes of running migrations from Package Manager console,
+        /// or any other scenario where a connection string will be set after the EntitiesContext is created
+        /// (and read only mode is don't care).
+        /// </summary>
+        public EntitiesContext()
+            : this("Gallery.SqlServer", false) // Use the connection string in a web.config (if one is found)
+        {
         }
 
         /// <summary>
@@ -22,21 +41,25 @@ namespace NuGetGallery
             ReadOnly = readOnly;
         }
 
-        /// <summary>
-        /// This constructor is provided mainly for purposes of running migrations from Package Manager console,
-        /// or any other scenario where a connection string will be set after the EntitiesContext is created 
-        /// (and read only mode is don't care).
-        /// </summary>
-        public EntitiesContext()
-            : base("Gallery.SqlServer") // Use the connection string in a web.config (if one is found)
+        public EntitiesContext(DbConnection connection, bool readOnly)
+            : base(connection, contextOwnsConnection: true)
         {
+            ReadOnly = readOnly;
         }
 
         public bool ReadOnly { get; private set; }
-        public IDbSet<CuratedFeed> CuratedFeeds { get; set; }
-        public IDbSet<CuratedPackage> CuratedPackages { get; set; }
         public IDbSet<PackageRegistration> PackageRegistrations { get; set; }
         public IDbSet<Credential> Credentials { get; set; }
+        public IDbSet<Scope> Scopes { get; set; }
+        public IDbSet<UserSecurityPolicy> UserSecurityPolicies { get; set; }
+        public IDbSet<ReservedNamespace> ReservedNamespaces { get; set; }
+        public IDbSet<Certificate> Certificates { get; set; }
+        public IDbSet<UserCertificate> UserCertificates { get; set; }
+        public IDbSet<SymbolPackage> SymbolPackages { get; set; }
+
+        /// <summary>
+        /// User or organization accounts.
+        /// </summary>
         public IDbSet<User> Users { get; set; }
 
         IDbSet<T> IEntitiesContext.Set<T>()
@@ -44,14 +67,14 @@ namespace NuGetGallery
             return base.Set<T>();
         }
 
-        public override int SaveChanges()
+        public override async Task<int> SaveChangesAsync()
         {
             if (ReadOnly)
             {
                 throw new ReadOnlyModeException("Save changes unavailable: the gallery is currently in read only mode, with limited service. Please try again later.");
             }
 
-            return base.SaveChanges();
+            return await base.SaveChangesAsync();
         }
 
         public void DeleteOnCommit<T>(T entity) where T : class
@@ -61,10 +84,15 @@ namespace NuGetGallery
 
         public void SetCommandTimeout(int? seconds)
         {
-            ((IObjectContextAdapter)this).ObjectContext.CommandTimeout = seconds;
+            ObjectContext.CommandTimeout = seconds;
         }
 
-#pragma warning disable 618 // TODO: remove Package.Authors completely once prodution services definitely no longer need it
+        public IDatabase GetDatabase()
+        {
+            return new DatabaseWrapper(Database);
+        }
+
+#pragma warning disable 618 // TODO: remove Package.Authors completely once production services definitely no longer need it
         protected override void OnModelCreating(DbModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Credential>()
@@ -72,6 +100,21 @@ namespace NuGetGallery
                 .HasRequired(c => c.User)
                     .WithMany(u => u.Credentials)
                     .HasForeignKey(c => c.UserKey);
+
+            modelBuilder.Entity<Scope>()
+                .HasKey(c => c.Key);
+
+            modelBuilder.Entity<Scope>()
+                .HasOptional(sc => sc.Owner)
+                .WithMany()
+                .HasForeignKey(sc => sc.OwnerKey)
+                .WillCascadeOnDelete(false);
+
+            modelBuilder.Entity<Scope>()
+                .HasRequired<Credential>(sc => sc.Credential)
+                .WithMany(cr => cr.Scopes)
+                .HasForeignKey(sc => sc.CredentialKey)
+                .WillCascadeOnDelete(true);
 
             modelBuilder.Entity<PackageLicenseReport>()
                 .HasKey(r => r.Key)
@@ -99,8 +142,80 @@ namespace NuGetGallery
                            .MapLeftKey("UserKey")
                            .MapRightKey("RoleKey"));
 
+            modelBuilder.Entity<Organization>()
+                .ToTable("Organizations");
+
+            modelBuilder.Entity<Membership>()
+                .HasKey(m => new { m.OrganizationKey, m.MemberKey });
+
+            modelBuilder.Entity<MembershipRequest>()
+                .HasKey(m => new { m.OrganizationKey, m.NewMemberKey });
+
+            modelBuilder.Entity<OrganizationMigrationRequest>()
+                .HasKey(m => m.NewOrganizationKey);
+
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.Organizations)
+                .WithRequired(m => m.Member)
+                .HasForeignKey(m => m.MemberKey)
+                .WillCascadeOnDelete(true); // Membership will be deleted with the Member account.
+
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.OrganizationRequests)
+                .WithRequired(m => m.NewMember)
+                .HasForeignKey(m => m.NewMemberKey)
+                .WillCascadeOnDelete(false);
+
+            modelBuilder.Entity<User>()
+                .HasOptional(u => u.OrganizationMigrationRequest)
+                .WithRequired(m => m.NewOrganization);
+
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.OrganizationMigrationRequests)
+                .WithRequired(m => m.AdminUser)
+                .HasForeignKey(m => m.AdminUserKey)
+                .WillCascadeOnDelete(true); // Migration request will be deleted with the Admin account.
+
+            modelBuilder.Entity<Organization>()
+                .HasMany(o => o.Members)
+                .WithRequired(m => m.Organization)
+                .HasForeignKey(m => m.OrganizationKey)
+                .WillCascadeOnDelete(true); // Memberships will be deleted with the Organization account.
+
+            modelBuilder.Entity<Organization>()
+                .HasMany(o => o.MemberRequests)
+                .WithRequired(m => m.Organization)
+                .HasForeignKey(m => m.OrganizationKey)
+                .WillCascadeOnDelete(false);
+
             modelBuilder.Entity<Role>()
                 .HasKey(u => u.Key);
+
+            modelBuilder.Entity<UserSecurityPolicy>()
+                .HasRequired<User>(p => p.User)
+                .WithMany(cr => cr.SecurityPolicies)
+                .HasForeignKey(p => p.UserKey)
+                .WillCascadeOnDelete(true);
+
+            modelBuilder.Entity<ReservedNamespace>()
+                .HasKey(p => p.Key);
+
+            modelBuilder.Entity<ReservedNamespace>()
+                .HasMany<PackageRegistration>(rn => rn.PackageRegistrations)
+                .WithMany(pr => pr.ReservedNamespaces)
+                .Map(prrn => prrn.ToTable("ReservedNamespaceRegistrations")
+                                .MapLeftKey("ReservedNamespaceKey")
+                                .MapRightKey("PackageRegistrationKey"));
+
+            modelBuilder.Entity<ReservedNamespace>()
+                .HasMany<User>(pr => pr.Owners)
+                .WithMany(u => u.ReservedNamespaces)
+                .Map(c => c.ToTable("ReservedNamespaceOwners")
+                           .MapLeftKey("ReservedNamespaceKey")
+                           .MapRightKey("UserKey"));
+
+            modelBuilder.Entity<UserSecurityPolicy>()
+                .HasKey(p => p.Key);
 
             modelBuilder.Entity<EmailMessage>()
                 .HasKey(em => em.Key);
@@ -125,6 +240,13 @@ namespace NuGetGallery
                            .MapLeftKey("PackageRegistrationKey")
                            .MapRightKey("UserKey"));
 
+            modelBuilder.Entity<PackageRegistration>()
+                .HasMany(pr => pr.RequiredSigners)
+                .WithMany()
+                .Map(c => c.ToTable("PackageRegistrationRequiredSigners")
+                           .MapLeftKey("PackageRegistrationKey")
+                           .MapRightKey("UserKey"));
+
             modelBuilder.Entity<Package>()
                 .HasKey(p => p.Key);
 
@@ -134,29 +256,17 @@ namespace NuGetGallery
                 .HasForeignKey(pa => pa.PackageKey);
 
             modelBuilder.Entity<Package>()
-                .HasMany<PackageStatistics>(p => p.DownloadStatistics)
-                .WithRequired(ps => ps.Package)
-                .HasForeignKey(ps => ps.PackageKey);
-
-            modelBuilder.Entity<Package>()
                 .HasMany<PackageDependency>(p => p.Dependencies)
                 .WithRequired(pd => pd.Package)
                 .HasForeignKey(pd => pd.PackageKey);
 
-            modelBuilder.Entity<PackageEdit>()
-                .HasKey(pm => pm.Key);
+            modelBuilder.Entity<Package>()
+                .HasMany<PackageType>(p => p.PackageTypes)
+                .WithRequired(pt => pt.Package)
+                .HasForeignKey(pt => pt.PackageKey);
 
-            modelBuilder.Entity<PackageEdit>()
-                .HasRequired(pm => pm.User)
-                .WithMany()
-                .HasForeignKey(pm => pm.UserKey)
-                .WillCascadeOnDelete(false);
-
-            modelBuilder.Entity<PackageEdit>()
-                .HasRequired<Package>(pm => pm.Package)
-                .WithMany(p => p.PackageEdits)
-                .HasForeignKey(pm => pm.PackageKey)
-                .WillCascadeOnDelete(true); // Pending PackageEdits get deleted with their package, since hey, there's no way to apply them without the package anyway.
+            modelBuilder.Entity<Package>()
+                .HasOptional(p => p.Certificate);
 
             modelBuilder.Entity<PackageHistory>()
                 .HasKey(pm => pm.Key);
@@ -176,9 +286,6 @@ namespace NuGetGallery
             modelBuilder.Entity<PackageAuthor>()
                 .HasKey(pa => pa.Key);
 
-            modelBuilder.Entity<PackageStatistics>()
-                .HasKey(ps => ps.Key);
-
             modelBuilder.Entity<PackageDependency>()
                 .HasKey(pd => pd.Key);
 
@@ -190,28 +297,77 @@ namespace NuGetGallery
 
             modelBuilder.Entity<PackageFramework>()
                 .HasKey(pf => pf.Key);
-            modelBuilder.Entity<CuratedFeed>()
-                .HasKey(cf => cf.Key);
 
-            modelBuilder.Entity<CuratedFeed>()
-                .HasMany<CuratedPackage>(cf => cf.Packages)
-                .WithRequired(cp => cp.CuratedFeed)
-                .HasForeignKey(cp => cp.CuratedFeedKey);
+            modelBuilder.Entity<PackageDelete>()
+                .HasKey(pd => pd.Key)
+                .HasMany(pd => pd.Packages)
+                    .WithOptional();
 
-            modelBuilder.Entity<CuratedFeed>()
-                .HasMany<User>(cf => cf.Managers)
+            modelBuilder.Entity<AccountDelete>()
+                .HasKey(a => a.Key)
+                .HasRequired(a => a.DeletedAccount);
+
+            modelBuilder.Entity<AccountDelete>()
+                .HasRequired(a => a.DeletedBy)
                 .WithMany()
-                .Map(c => c.ToTable("CuratedFeedManagers")
-                           .MapLeftKey("CuratedFeedKey")
-                           .MapRightKey("UserKey"));
+                .WillCascadeOnDelete(false);
 
-            modelBuilder.Entity<CuratedPackage>()
-                .HasKey(cp => cp.Key);
+            modelBuilder.Entity<Certificate>()
+                .HasKey(c => c.Key);
 
-            modelBuilder.Entity<CuratedPackage>()
-                .HasRequired(cp => cp.PackageRegistration);
+            modelBuilder.Entity<Certificate>()
+                .Property(c => c.Thumbprint)
+                .HasMaxLength(256)
+                .HasColumnType("varchar")
+                .IsRequired()
+                .HasColumnAnnotation(
+                    IndexAnnotation.AnnotationName,
+                    new IndexAnnotation(new[]
+                    {
+                        new IndexAttribute(CertificatesThumbprintIndex)
+                        {
+                            IsUnique = true,
+                        }
+                    }));
+
+            modelBuilder.Entity<Certificate>()
+                .Property(c => c.Sha1Thumbprint)
+                .HasMaxLength(40)
+                .HasColumnType("varchar")
+                .IsRequired();
+
+            modelBuilder.Entity<UserCertificate>()
+                .HasKey(uc => uc.Key);
+
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.UserCertificates)
+                .WithRequired(uc => uc.User)
+                .HasForeignKey(uc => uc.UserKey)
+                .WillCascadeOnDelete(true); // Deleting a User entity will also delete related UserCertificate entities.
+
+            modelBuilder.Entity<Certificate>()
+                .HasMany(c => c.UserCertificates)
+                .WithRequired(uc => uc.Certificate)
+                .HasForeignKey(uc => uc.CertificateKey)
+                .WillCascadeOnDelete(true); // Deleting a Certificate entity will also delete related UserCertificate entities.
+
+            modelBuilder.Entity<Certificate>()
+                .Property(pv => pv.Expiration)
+                .IsOptional()
+                .HasColumnType("datetime2");
+
+            modelBuilder.Entity<SymbolPackage>()
+                .HasKey(s => s.Key);
+
+            modelBuilder.Entity<Package>()
+                .HasMany(p => p.SymbolPackages)
+                .WithRequired(s => s.Package)
+                .HasForeignKey(p => p.PackageKey);
+
+            modelBuilder.Entity<SymbolPackage>()
+                .Property(s => s.RowVersion)
+                .IsRowVersion();
         }
 #pragma warning restore 618
-
     }
 }

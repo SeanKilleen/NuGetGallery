@@ -4,34 +4,23 @@
     ViewBag.Tab = "Statistics";
 }
 
-<h1 class="statistics-report-title">Package Downloads for <a href="@Url.Package(Model.PackageId, Model.PackageVersion)">@Model.PackageId @Model.PackageVersion</a> (Over the Last 6 Weeks)</h1>
-@if (Model.IsReportAvailable)
-{
-    @Html.Partial("_PivotTable", Model.Report)
-
-        <div class="statistics-graph" id="statistics-graph-id">
+<section role="main" class="container main-container page-stats-per-package">
+    <div class="row">
+        <h1 class="statistics-report-title col-sm-12 page-heading">
+            Package Downloads for <a href="@Url.Package(Model.PackageId, Model.PackageVersion)">@Model.PackageId @Model.PackageVersion</a>
+        </h1>
     </div>
-    @Html.Partial("_LastUpdated", Model)
-}
-else
-{
-    <p>
-        Download statistics are not currently available for this package, please check back later. 
-    </p>
-}
+
+    @Html.Partial("_PivotTable")
+</section>
 
 @section BottomScripts
 {
-    @if (Model.UseD3)
-    {
-        @Scripts.Render("~/Scripts/d3.v3.min.js")
-    }
-    @Scripts.Render("~/Scripts/statsdimensions.js")
-    @Scripts.Render("~/Scripts/perpackagestatsgraphs.js")
+    @Scripts.Render("~/Scripts/gallery/stats.min.js")
     <script>
-        $(document).ready(function() {
-            groupbyNavigation();
-            packageDisplayGraphs();
-        });
+        $(document)
+            .ready(function () {
+                renderGraph('@Url.StatisticsPackageDownloadsDetailReport()', location.search);
+            });
     </script>
 }

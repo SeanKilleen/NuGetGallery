@@ -1,54 +1,58 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System.Data;
+using System.Data.Common;
 using System.Data.SqlClient;
-using System.Diagnostics.CodeAnalysis;
-using System.Threading;
+using System.Threading.Tasks;
 using System.Web.DynamicData;
-using System.Web.Optimization;
 using System.Web.Routing;
-using System.Web.UI;
-using DynamicData.EFCodeFirstProvider;
-using NuGetGallery.Configuration;
+using Microsoft.AspNet.DynamicData.ModelProviders;
+using NuGet.Services.Sql;
 
 namespace NuGetGallery.Areas.Admin.DynamicData
 {
     public class DynamicDataManager
     {
-        [SuppressMessage("Microsoft.Security", "CA2104:DoNotDeclareReadOnlyMutableReferenceTypes", Justification = "We do treat this as immutable.")]
-        public static readonly MetaModel DefaultModel = new MetaModel() { DynamicDataFolderVirtualPath = "~/Areas/Admin/DynamicData" };
+        public static MetaModel DefaultModel { get; } = new MetaModel { DynamicDataFolderVirtualPath = "~/Areas/Admin/DynamicData" };
 
         private static DynamicDataRoute _route;
-        
-        public static void Register(RouteCollection routes, string root, IAppConfiguration configuration)
+
+        public static void Register(RouteCollection routes, string root, ISqlConnectionFactory galleryDbSqlConnectionFactory)
         {
             // Set up unobtrusive validation
             InitializeValidation();
 
             // Set up dynamic data
-            InitializeDynamicData(routes, root, configuration);
+            InitializeDynamicData(routes, root, galleryDbSqlConnectionFactory);
         }
 
         private static void InitializeValidation()
         {
         }
 
-        private static void InitializeDynamicData(RouteCollection routes, string root, IAppConfiguration configuration)
+        private static DbConnection CreateConnection(ISqlConnectionFactory connectionFactory)
+        {
+            return Task.Run(() => connectionFactory.CreateAsync()).Result;
+        }
+
+        private static void InitializeDynamicData(RouteCollection routes, string root, ISqlConnectionFactory connectionFactory)
         {
             try
             {
                 DefaultModel.RegisterContext(
-                    new EFCodeFirstDataModelProvider(
-                        () => new EntitiesContext(configuration.SqlConnectionString, readOnly: false)), // DB Admins do not need to respect read-only mode.
+                    new EFDataModelProvider(
+                        () => new EntitiesContext(CreateConnection(connectionFactory), readOnly: false)), // DB Admins do not need to respect read-only mode.
                         configuration: new ContextConfiguration { ScaffoldAllTables = true });
             }
             catch (SqlException e)
             {
-                QuietlyLogException(e);
+                QuietLog.LogHandledException(e);
                 return;
             }
             catch (DataException e)
             {
-                QuietlyLogException(e);
+                QuietLog.LogHandledException(e);
                 return;
             }
 
@@ -64,18 +68,6 @@ namespace NuGetGallery.Areas.Admin.DynamicData
                 "dd_default",
                 root,
                 "~/Areas/Admin/DynamicData/Default.aspx");
-        }
-
-        private static void QuietlyLogException(Exception e)
-        {
-            try
-            {
-                Elmah.ErrorSignal.FromCurrentContext().Raise(e);
-            }
-            catch
-            {
-                // logging failed, don't allow exception to escape
-            }
         }
     }
 }

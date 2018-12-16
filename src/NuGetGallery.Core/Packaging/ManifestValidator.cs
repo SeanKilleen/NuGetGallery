@@ -1,128 +1,220 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using NuGet;
-using NuGet.Resources;
+using NuGet.Packaging;
+using NuGet.Versioning;
 
 namespace NuGetGallery.Packaging
 {
     public class ManifestValidator
     {
-        // Copy-pasta from NuGet: src/Core/Utility/PackageIdValidator.cs because that constant is internal :(
-        public static readonly int MaxPackageIdLength = 100;
-
-        public static IEnumerable<ValidationResult> Validate(Manifest manifest)
+        public static IEnumerable<ValidationResult> Validate(Stream nuspecStream, out NuspecReader nuspecReader, out PackageMetadata packageMetadata)
         {
-            return Validate(manifest.Metadata);
-        }
+            packageMetadata = null;
 
-        public static IEnumerable<ValidationResult> Validate(INupkg nupkg)
-        {
-            var metadata = nupkg.Metadata as ManifestMetadata;
-            if (metadata != null)
+            try
             {
-                return Validate(metadata);
+                nuspecReader = new NuspecReader(nuspecStream);
+                var rawMetadata = nuspecReader.GetMetadata();
+                if (rawMetadata != null && rawMetadata.Any())
+                {
+                    packageMetadata = PackageMetadata.FromNuspecReader(nuspecReader, strict: true);
+                    return ValidateCore(packageMetadata);
+                }
             }
+            catch (Exception ex)
+            {
+                nuspecReader = null;
+                packageMetadata = null;
+                return new[] { new ValidationResult(ex.Message) };
+            }
+
             return Enumerable.Empty<ValidationResult>();
         }
 
-        public static IEnumerable<ValidationResult> Validate(ManifestMetadata metadata)
+        private static IEnumerable<ValidationResult> ValidateCore(PackageMetadata packageMetadata)
         {
             // Validate the ID
-            if (String.IsNullOrEmpty(metadata.Id))
+            if (string.IsNullOrEmpty(packageMetadata.Id))
             {
-                yield return new ValidationResult(Strings.Manifest_MissingId);
+                yield return new ValidationResult(CoreStrings.Manifest_MissingId);
             }
             else
             {
-                if (metadata.Id.Length > MaxPackageIdLength)
+                if (packageMetadata.Id.Length > NuGet.Packaging.PackageIdValidator.MaxPackageIdLength)
                 {
-                    yield return new ValidationResult(Strings.Manifest_IdTooLong);
+                    yield return new ValidationResult(CoreStrings.Manifest_IdTooLong);
                 }
-                else if (!PackageIdValidator.IsValidPackageId(metadata.Id))
+                else if (!PackageIdValidator.IsValidPackageId(packageMetadata.Id))
                 {
                     yield return new ValidationResult(String.Format(
                         CultureInfo.CurrentCulture,
-                        Strings.Manifest_InvalidId,
-                        metadata.Id));
+                        CoreStrings.Manifest_InvalidId,
+                        packageMetadata.Id));
                 }
             }
 
-            foreach (var result in CheckUrls(metadata.IconUrl, metadata.ProjectUrl, metadata.LicenseUrl))
+            // Check and validate URL properties
+            foreach (var result in CheckUrls(
+                packageMetadata.GetValueFromMetadata("IconUrl"),
+                packageMetadata.GetValueFromMetadata("ProjectUrl"),
+                packageMetadata.GetValueFromMetadata("LicenseUrl")))
             {
                 yield return result;
             }
 
-            SemanticVersion __;
-            if (!SemanticVersion.TryParse(metadata.Version, out __))
+            // Check version
+            if (packageMetadata.Version == null)
             {
+                var version = packageMetadata.GetValueFromMetadata("version");
+
                 yield return new ValidationResult(String.Format(
                     CultureInfo.CurrentCulture,
-                    Strings.Manifest_InvalidVersion,
-                    metadata.Version));
+                    CoreStrings.Manifest_InvalidVersion,
+                    version));
             }
 
-            if (metadata.DependencySets != null)
+            var versionValidationResult = ValidateVersionForLegacyClients(packageMetadata.Version);
+            if (versionValidationResult != null)
             {
-                foreach (var dependency in metadata.DependencySets.SelectMany(set => set.Dependencies))
+                yield return versionValidationResult;
+            }
+
+            // Check framework reference groups
+            var frameworkReferenceGroups = packageMetadata.GetFrameworkReferenceGroups();
+            if (frameworkReferenceGroups != null)
+            {
+                foreach (var frameworkReferenceGroup in frameworkReferenceGroups)
                 {
-                    IVersionSpec ___;
-                    if (!PackageIdValidator.IsValidPackageId(dependency.Id) || ( !string.IsNullOrEmpty(dependency.Version) && !VersionUtility.TryParseVersionSpec(dependency.Version, out ___)))
+                    var isUnsupportedFramework = frameworkReferenceGroup?.TargetFramework?.IsUnsupported;
+                    if (isUnsupportedFramework.HasValue && isUnsupportedFramework.Value)
                     {
                         yield return new ValidationResult(String.Format(
                             CultureInfo.CurrentCulture,
-                            Strings.Manifest_InvalidDependency,
-                            dependency.Id,
-                            dependency.Version));
+                            CoreStrings.Manifest_TargetFrameworkNotSupported,
+                            frameworkReferenceGroup?.TargetFramework?.ToString()));
                     }
                 }
             }
 
-            var fxes = Enumerable.Concat(
-                metadata.FrameworkAssemblies == null ? 
-                    Enumerable.Empty<string>() : 
-                    (metadata.FrameworkAssemblies.Select(a => a.TargetFramework)),
-                metadata.DependencySets == null ?
-                    Enumerable.Empty<string>() :
-                    (metadata.DependencySets.Select(s => s.TargetFramework)));
-            foreach (var fx in fxes)
+            // Check dependency groups
+            var dependencyGroups = packageMetadata.GetDependencyGroups();
+            if (dependencyGroups != null)
             {
-                //if target framework is not specified, then continue. Validate only for wrong specification.
-                if (string.IsNullOrEmpty(fx))
-                    continue;
-                ValidationResult result = null;
-                try
+                foreach (var dependencyGroup in dependencyGroups)
                 {
-                    VersionUtility.ParseFrameworkName(fx);
-                }
-                catch (ArgumentException)
-                {
-                    // Can't yield in the body of a catch...
-                    result = new ValidationResult(String.Format(
-                        CultureInfo.CurrentCulture,
-                        Strings.Manifest_InvalidTargetFramework,
-                        fx));
-                }
+                    // Keep track of duplicates
+                    var dependencyIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                if (result != null)
-                {
-                    yield return result;
+                    // Verify frameworks
+                    var isUnsupportedFramework = dependencyGroup.TargetFramework?.IsUnsupported;
+                    if (isUnsupportedFramework.HasValue && isUnsupportedFramework.Value)
+                    {
+                        yield return new ValidationResult(String.Format(
+                            CultureInfo.CurrentCulture,
+                            CoreStrings.Manifest_TargetFrameworkNotSupported,
+                            dependencyGroup.TargetFramework?.ToString()));
+                    }
+
+                    // Verify package id's and versions
+                    foreach (var dependency in dependencyGroup.Packages)
+                    {
+                        bool duplicate = !dependencyIds.Add(dependency.Id);
+                        if (duplicate)
+                        {
+                            yield return new ValidationResult(String.Format(
+                                CultureInfo.CurrentCulture,
+                                CoreStrings.Manifest_DuplicateDependency,
+                                dependencyGroup.TargetFramework.GetShortFolderName(),
+                                dependency.Id));
+                        }
+
+                        if (!PackageIdValidator.IsValidPackageId(dependency.Id))
+                        {
+                            yield return new ValidationResult(String.Format(
+                                CultureInfo.CurrentCulture,
+                                CoreStrings.Manifest_InvalidDependency,
+                                dependency.Id,
+                                dependency.VersionRange.OriginalString));
+                        }
+
+                        // Versions
+                        if (dependency.VersionRange.MinVersion != null)
+                        {
+                            var versionRangeValidationResult =
+                                ValidateDependencyVersion(dependency.VersionRange.MinVersion);
+                            if (versionRangeValidationResult != null)
+                            {
+                                yield return versionRangeValidationResult;
+                            }
+                        }
+
+                        if (dependency.VersionRange.MaxVersion != null
+                            && dependency.VersionRange.MaxVersion != dependency.VersionRange.MinVersion)
+                        {
+                            var versionRangeValidationResult =
+                                ValidateDependencyVersion(dependency.VersionRange.MaxVersion);
+                            if (versionRangeValidationResult != null)
+                            {
+                                yield return versionRangeValidationResult;
+                            }
+                        }
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Checks whether the provided version is consumable by legacy 2.x clients,
+        /// which do not support a `.` in release labels, or release labels starting with numeric characters.
+        /// See also https://github.com/NuGet/NuGetGallery/issues/3226.
+        /// </summary>
+        /// <param name="version">The <see cref="NuGetVersion"/> to check for 2.x client compatibility.</param>
+        /// <returns>Returns a <see cref="ValidationResult"/> when non-compliant; otherwise <c>null</c>.</returns>
+        private static ValidationResult ValidateVersionForLegacyClients(NuGetVersion version)
+        {
+            if (!version.IsSemVer2 && !version.IsValidVersionForLegacyClients())
+            {
+                return new ValidationResult(string.Format(
+                    CultureInfo.CurrentCulture,
+                    CoreStrings.Manifest_InvalidVersion,
+                    version));
+            }
+
+            return null;
+        }
+
+        private static ValidationResult ValidateDependencyVersion(NuGetVersion version)
+        {
+            if (version.HasMetadata)
+            {
+                return new ValidationResult(string.Format(
+                    CultureInfo.CurrentCulture,
+                    CoreStrings.Manifest_InvalidDependencyVersion,
+                    version.ToFullString()));
+            }
+
+            return ValidateVersionForLegacyClients(version);
         }
 
         private static IEnumerable<ValidationResult> CheckUrls(params string[] urls)
         {
             foreach (var url in urls)
             {
-                Uri _;
-                if (!String.IsNullOrEmpty(url) && !Uri.TryCreate(url, UriKind.Absolute, out _))
+                Uri uri = null;
+                if (!string.IsNullOrEmpty(url) && !Uri.TryCreate(url, UriKind.Absolute, out uri))
                 {
-                    yield return new ValidationResult(Strings.Manifest_InvalidUrl);
+                    yield return new ValidationResult(CoreStrings.Manifest_InvalidUrl);
+                }
+                else if (uri != null && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+                {
+                    yield return new ValidationResult(CoreStrings.Manifest_InvalidUrl);
                 }
             }
         }

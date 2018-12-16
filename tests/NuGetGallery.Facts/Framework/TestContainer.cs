@@ -1,41 +1,45 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Web;
 using System.Web.Mvc;
 using System.Web.Routing;
-using Microsoft.Owin;
+using Autofac;
 using Moq;
-using Ninject;
-using Ninject.Modules;
+using NuGet.Services.Entities;
 using NuGetGallery.Configuration;
-using Xunit.Extensions;
 
 namespace NuGetGallery.Framework
 {
-    public class TestContainer : TestClass, IDisposable
+    public class TestContainer : IDisposable
     {
-        public IKernel Kernel { get; private set; }
+        public IContainer Container { get; private set; }
 
         public TestContainer() : this(UnitTestBindings.CreateContainer(autoMock: true)) { }
-        protected TestContainer(IKernel kernel)
+
+        protected TestContainer(IContainer container)
         {
             // Initialize the container
-            Kernel = kernel;
+            Container = container;
         }
 
-        protected TController GetController<TController>() where TController : Controller
+        protected TController GetController<TController>()
+            where TController : Controller
         {
-            if (!Kernel.GetBindings(typeof(TController)).Any())
+            if (!Container.IsRegistered(typeof(TController)))
             {
-                Kernel.Bind<TController>().ToSelf();
+                var updater = new ContainerBuilder();
+                updater.RegisterType<TController>().PropertiesAutowired().AsSelf();
             }
-            var c = Kernel.Get<TController>();
+
+            var c = Container.Resolve<TController>();
+
+            Container.InjectMockProperties(Mock.Get(c));
+
             c.ControllerContext = new ControllerContext(
-                new RequestContext(Kernel.Get<HttpContextBase>(), new RouteData()), c);
-            
+                new RequestContext(Container.Resolve<HttpContextBase>(), new RouteData()), c);
+
             var routeCollection = new RouteCollection();
             Routes.RegisterRoutes(routeCollection);
             c.Url = new UrlHelper(c.ControllerContext.RequestContext, routeCollection);
@@ -43,55 +47,100 @@ namespace NuGetGallery.Framework
             var appCtrl = c as AppController;
             if (appCtrl != null)
             {
-                appCtrl.OwinContext = Kernel.Get<IOwinContext>();
-                appCtrl.NuGetContext.Config = Kernel.Get<ConfigurationService>();
+                appCtrl.SetOwinContextOverride(Fakes.CreateOwinContext());
+                appCtrl.NuGetContext.Config = GetConfigurationService();
             }
-            
+
             return c;
+        }
+
+        protected TestGalleryConfigurationService GetConfigurationService()
+        {
+            return Container.Resolve<IGalleryConfigurationService>() as TestGalleryConfigurationService;
         }
 
         protected TService GetService<TService>()
         {
-            var serviceInterfaces = typeof(TService).GetInterfaces();
-            Kernel.Bind(serviceInterfaces).To(typeof(TService));
+            var updater = new ContainerBuilder();
+            updater.RegisterType<TService>().AsImplementedInterfaces().AsSelf();
+
             return Get<TService>();
         }
 
         protected FakeEntitiesContext GetFakeContext()
         {
-            var fakeContext = new FakeEntitiesContext();
-            Kernel.Bind<IEntitiesContext>().ToConstant(fakeContext);
-            Kernel.Bind<IEntityRepository<Package>>().ToConstant(new EntityRepository<Package>(fakeContext));
-            Kernel.Bind<IEntityRepository<PackageOwnerRequest>>().ToConstant(new EntityRepository<PackageOwnerRequest>(fakeContext));
-            Kernel.Bind<IEntityRepository<PackageStatistics>>().ToConstant(new EntityRepository<PackageStatistics>(fakeContext));
-            Kernel.Bind<IEntityRepository<PackageRegistration>>().ToConstant(new EntityRepository<PackageRegistration>(fakeContext));
+            var fakeContext = Container.Resolve<IEntitiesContext>() as FakeEntitiesContext;
+
+            if (fakeContext == null)
+            {
+                fakeContext = new FakeEntitiesContext();
+            }
+
+            var updater = new ContainerBuilder();
+            updater.RegisterInstance(fakeContext).As<IEntitiesContext>();
+
+            updater.RegisterInstance(new EntityRepository<Package>(fakeContext))
+                .As<IEntityRepository<Package>>();
+
+            updater.RegisterInstance(new EntityRepository<PackageOwnerRequest>(fakeContext))
+                .As<IEntityRepository<PackageOwnerRequest>>();
+
+            updater.RegisterInstance(new EntityRepository<PackageRegistration>(fakeContext))
+                .As<IEntityRepository<PackageRegistration>>();
+
+#pragma warning disable CS0618 // Type or member is obsolete
+            updater.Update(Container);
+#pragma warning restore CS0618 // Type or member is obsolete
+
             return fakeContext;
         }
 
         protected T Get<T>()
         {
-            if(typeof(Controller).IsAssignableFrom(typeof(T))) {
+            if (typeof(Controller).IsAssignableFrom(typeof(T)))
+            {
                 throw new InvalidOperationException("Use GetController<T> to get a controller instance");
             }
-            return Kernel.Get<T>();
+
+            return Container.Resolve<T>();
         }
 
         protected Mock<T> GetMock<T>() where T : class
         {
-            if (!Kernel.GetBindings(typeof(T)).Any())
+            bool registerMock = false;
+            if (Container.IsRegistered(typeof(T)))
             {
-                Kernel.Bind<T>().ToConstant((new Mock<T>() { CallBase = true }).Object);
+                try
+                {
+                    Mock.Get(Container.Resolve<T>());
+                }
+                catch
+                {
+                    registerMock = true;
+                }
             }
-            T instance = Kernel.Get<T>();
+
+            if (registerMock || !Container.IsRegistered(typeof(T)))
+            {
+                var mockInstance = (new Mock<T>() { CallBase = true }).Object;
+
+                var updater = new ContainerBuilder();
+                updater.RegisterInstance(mockInstance).As<T>();
+#pragma warning disable CS0618 // Type or member is obsolete
+                updater.Update(Container);
+#pragma warning restore CS0618 // Type or member is obsolete
+            }
+
+            T instance = Container.Resolve<T>();
             return Mock.Get(instance);
         }
 
         protected virtual void Dispose(bool disposing)
         {
-            if (Kernel != null)
+            if (Container != null)
             {
-                Kernel.Dispose();
-                Kernel = null;
+                Container.Dispose();
+                Container = null;
             }
         }
 
@@ -101,4 +150,3 @@ namespace NuGetGallery.Framework
         }
     }
 }
-

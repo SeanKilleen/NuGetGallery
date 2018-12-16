@@ -1,9 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
-using System.Web;
 using System.Web.Mvc;
 using NuGetGallery.Areas.Admin.Models;
 using NuGetGallery.Configuration;
@@ -29,13 +28,12 @@ namespace NuGetGallery.Areas.Admin.Controllers
 
         public virtual async Task<ActionResult> Index()
         {
-            return View("Index",
-                await GetLuceneInfo());
+            return View("Index", await GetLuceneInfo());
         }
 
         private async Task<LuceneInfoModel> GetLuceneInfo()
         {
-            var model = new LuceneInfoModel()
+            var model = new LuceneInfoModel
             {
                 Directory = IndexingService.IndexPath,
                 IsLocal = IndexingService.IsLocal,
@@ -57,6 +55,7 @@ namespace NuGetGallery.Areas.Admin.Controllers
         }
 
         [HttpPost]
+        [ValidateAntiForgeryToken]
         public virtual Task<ActionResult> Rebuild()
         {
             IndexingService.UpdateIndex(forceRefresh: true);

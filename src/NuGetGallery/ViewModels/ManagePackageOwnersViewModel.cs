@@ -1,24 +1,18 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Security.Principal;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using NuGet.Services.Entities;
 
 namespace NuGetGallery
 {
     public class ManagePackageOwnersViewModel : ListPackageItemViewModel
     {
-        public ManagePackageOwnersViewModel(Package package, IPrincipal currentUser)
-            : base(package)
-        {
-            CurrentOwnerUsername = currentUser.Identity.Name;
-            OtherOwners = Owners.Where(o => o.Username != CurrentOwnerUsername);
-        }
+        public bool IsCurrentUserAnAdmin;
 
-        public bool HasOtherOwners
+        public ManagePackageOwnersViewModel(Package package, User currentUser)
+            : base(package, currentUser)
         {
-            get { return OtherOwners.Any(); }
+            IsCurrentUserAnAdmin = currentUser.IsAdministrator;
         }
-
-        public string CurrentOwnerUsername { get; private set; }
-        public IEnumerable<User> OtherOwners { get; private set; }
     }
 }

@@ -1,55 +1,54 @@
-﻿using NuGetGallery.Configuration;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
 using System;
 using System.Collections.Generic;
 using System.Data.Entity;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using System.Web;
 using System.Web.Mvc;
+using NuGetGallery.Configuration;
 using NuGetGallery.Helpers;
 
 namespace NuGetGallery
 {
     public class StatusService : IStatusService
     {
+        private readonly HttpClient _httpClient = new HttpClient();
         private readonly IEntitiesContext _entities;
-        private readonly IFileStorageService _fileStorageService;
+        private readonly List<ICloudStorageStatusDependency> _cloudStorageAvailabilityChecks;
         private readonly IAppConfiguration _config;
 
         private const string Available = "Available";
         private const string Unavailable = "Unavailable";
         private const string Unconfigured = "Unconfigured";
-        private const string StatusMessageFormat = "NuGet Gallery instance {5} is {0}. SQL is {1}. Storage is {2}. Search service is {3}. Metrics service is {4}";
+        private const string StatusMessageFormat = "NuGet Gallery instance {4} is {0}. SQL is {1}. Storage is {2}. Search service is {3}.";
 
         private const string TestSqlQuery = "SELECT TOP(1) [Key] FROM GallerySettings WITH (NOLOCK)";
 
         public StatusService(
             IEntitiesContext entities,
-            IFileStorageService fileStorageService,
+            IEnumerable<ICloudStorageStatusDependency> cloudStorageAvailabilityChecks,
             IAppConfiguration config)
         {
             _entities = entities;
-            _fileStorageService = fileStorageService;
+            _cloudStorageAvailabilityChecks = cloudStorageAvailabilityChecks.ToList();
             _config = config;
         }
 
-        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "Just want to log the exception and return the appropriate HTTPStatusCode")]
         public async Task<ActionResult> GetStatus()
         {
             bool sqlAzureAvailable =  IsSqlAzureAvailable();
             bool? storageAvailable = await IsAzureStorageAvailable();
             bool? searchServiceAvailable = await IsSearchServiceAvailable();
-            bool? metricsServiceAvailable = await IsMetricsServiceAvailable();
 
             bool galleryServiceAvailable =
                 sqlAzureAvailable
                 && (!storageAvailable.HasValue || storageAvailable.Value) // null == true for this condition.
-                && (!searchServiceAvailable.HasValue || searchServiceAvailable.Value)
-                && (!metricsServiceAvailable.HasValue || metricsServiceAvailable.Value);
+                && (!searchServiceAvailable.HasValue || searchServiceAvailable.Value);
 
             return new HttpStatusCodeWithBodyResult(AvailabilityStatusCode(galleryServiceAvailable),
                 String.Format(CultureInfo.InvariantCulture,
@@ -58,7 +57,6 @@ namespace NuGetGallery
                     AvailabilityMessage(sqlAzureAvailable),
                     AvailabilityMessage(storageAvailable),
                     AvailabilityMessage(searchServiceAvailable),
-                    AvailabilityMessage(metricsServiceAvailable),
                     HostMachine.Name));
         }
 
@@ -93,7 +91,9 @@ namespace NuGetGallery
             try
             {
                 // Check Storage Availability
-                storageAvailable = await _fileStorageService.FileExistsAsync(Constants.DownloadsFolderName, "nuget.exe");
+                var tasks = _cloudStorageAvailabilityChecks.Select(s => s.IsAvailableAsync());
+                var eachAvailable = await Task.WhenAll(tasks);
+                storageAvailable = eachAvailable.All(a => a);
             }
             catch (Exception ex)
             {
@@ -108,30 +108,19 @@ namespace NuGetGallery
 
         private async Task<bool?> IsSearchServiceAvailable()
         {
-            if (_config == null || _config.SearchServiceUri == null)
+            if (_config == null || _config.ServiceDiscoveryUri == null)
             {
                 return null;
             }
 
-            return await IsGetSuccessful(_config.SearchServiceUri);
-        }
-
-        private async Task<bool?> IsMetricsServiceAvailable()
-        {
-            if (_config == null || _config.MetricsServiceUri == null)
-            {
-                return null;
-            }
-
-            return await IsGetSuccessful(_config.MetricsServiceUri);
+            return await IsGetSuccessful(_config.ServiceDiscoveryUri);
         }
 
         private async Task<bool> IsGetSuccessful(Uri uri)
         {
-            using(var httpClient = new HttpClient())
+            // This method does not throw for unsuccessful responses
+            using (var responseMessage = await _httpClient.GetAsync(uri))
             {
-                // This method does not throw for unsuccessful responses
-                var responseMessage = await httpClient.GetAsync(uri);
                 return responseMessage.IsSuccessStatusCode;
             }
         }

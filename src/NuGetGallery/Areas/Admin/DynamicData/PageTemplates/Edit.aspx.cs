@@ -1,29 +1,39 @@
-﻿using System;
+using System;
+using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using System.Data.Entity.Core.Objects;
 using System.Web.DynamicData;
+using System.Web.Routing;
 using System.Web.UI;
 using System.Web.UI.WebControls;
+using System.Web.UI.WebControls.Expressions;
 
-namespace NuGetGallery.Areas.Admin.DynamicData
+namespace NuGetGallery
 {
-    public partial class Edit : Page
+    public partial class Edit : System.Web.UI.Page
     {
         protected MetaTable table;
 
         protected void Page_Init(object sender, EventArgs e)
         {
             table = DynamicDataRouteHandler.GetRequestMetaTable(Context);
-            DetailsView1.SetMetaTable(table);
+            FormView1.SetMetaTable(table);
             DetailsDataSource.EntityTypeFilter = table.EntityType.Name;
-            DetailsView1.RowsGenerator = new OrderedFieldGenerator(table);
-            Title = table.DisplayName;
-            DetailsDataSource.Include = table.ForeignKeyColumnsNames;
+
+            DetailsDataSource.ContextCreating += (o, args) =>
+            {
+                args.Context = (ObjectContext)table.CreateContext();
+            };
+            ViewStateUserKey = User.Identity.Name;
         }
 
         protected void Page_Load(object sender, EventArgs e)
         {
+            Title = table.DisplayName;
+            DetailsDataSource.Include = table.ForeignKeyColumnsNames;
         }
 
-        protected void DetailsView1_ItemCommand(object sender, DetailsViewCommandEventArgs e)
+        protected void FormView1_ItemCommand(object sender, FormViewCommandEventArgs e)
         {
             if (e.CommandName == DataControlCommands.CancelCommandName)
             {
@@ -31,12 +41,13 @@ namespace NuGetGallery.Areas.Admin.DynamicData
             }
         }
 
-        protected void DetailsView1_ItemUpdated(object sender, DetailsViewUpdatedEventArgs e)
+        protected void FormView1_ItemUpdated(object sender, FormViewUpdatedEventArgs e)
         {
             if (e.Exception == null || e.ExceptionHandled)
             {
                 Response.Redirect(table.ListActionPath);
             }
         }
+
     }
 }

@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections;
 using System.Web.UI;
 
@@ -6,6 +8,12 @@ namespace NuGetGallery.Areas.Admin.DynamicData
 {
     public partial class _Default : Page
     {
+        protected override void OnInit(EventArgs e)
+        {
+            base.OnInit(e);
+            ViewStateUserKey = User.Identity.Name;
+        }
+
         protected void Page_Load(object sender, EventArgs e)
         {
             IList visibleTables = DynamicDataManager.DefaultModel.VisibleTables;

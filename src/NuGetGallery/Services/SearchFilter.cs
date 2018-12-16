@@ -1,4 +1,8 @@
-﻿using NuGet.Services.Search.Models;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using NuGet.Services.Search.Models;
+
 namespace NuGetGallery
 {
     public class SearchFilter
@@ -18,7 +22,7 @@ namespace NuGetGallery
 
         public bool IncludePrerelease { get; set; }
 
-        public CuratedFeed CuratedFeed { get; set; }
+        public string SemVerLevel { get; set; }
 
         public SortOrder SortOrder { get; set; }
 

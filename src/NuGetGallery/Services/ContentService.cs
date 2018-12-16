@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -21,11 +23,6 @@ namespace NuGetGallery
 
         private IDiagnosticsSource Trace { get; set; }
 
-        public static readonly string HtmlContentFileExtension = ".html";
-        public static readonly string MarkdownContentFileExtension = ".md";
-
-        public static readonly string JsonContentFileExtension = ".json";
-
         public IFileStorageService FileStorage { get; protected set; }
 
         protected ConcurrentDictionary<string, ContentItem> ContentCache { get { return _contentCache; } }
@@ -39,12 +36,12 @@ namespace NuGetGallery
         {
             if (fileStorage == null)
             {
-                throw new ArgumentNullException("fileStorage");
+                throw new ArgumentNullException(nameof(fileStorage));
             }
 
             if (diagnosticsService == null)
             {
-                throw new ArgumentNullException("diagnosticsService");
+                throw new ArgumentNullException(nameof(diagnosticsService));
             }
 
             FileStorage = fileStorage;
@@ -59,14 +56,39 @@ namespace NuGetGallery
         {
             if (String.IsNullOrEmpty(name))
             {
-                throw new ArgumentException(String.Format(CultureInfo.CurrentCulture, Strings.ParameterCannotBeNullOrEmpty, "name"), "name");
+                throw new ArgumentException(String.Format(CultureInfo.CurrentCulture, Strings.ParameterCannotBeNullOrEmpty, nameof(name)), nameof(name));
+            }
+            
+            return GetContentItemCore(
+                name, new [] { 
+                    GalleryConstants.HtmlFileExtension,
+                    GalleryConstants.MarkdownFileExtension,
+                    GalleryConstants.JsonFileExtension }, 
+                expiresIn);
+        }
+
+        public Task<IHtmlString> GetContentItemAsync(string name, string extension, TimeSpan expiresIn)
+        {
+            if (String.IsNullOrEmpty(name))
+            {
+                throw new ArgumentException(String.Format(CultureInfo.CurrentCulture, Strings.ParameterCannotBeNullOrEmpty, nameof(name)), nameof(name));
             }
 
-            return GetContentItemCore(name, expiresIn);
+            if (String.IsNullOrEmpty(extension))
+            {
+                throw new ArgumentException(String.Format(CultureInfo.CurrentCulture, Strings.ParameterCannotBeNullOrEmpty, nameof(extension)), nameof(extension));
+            }
+
+            if (!extension.StartsWith(".", StringComparison.OrdinalIgnoreCase))
+            {
+                extension = "." + extension;
+            }
+
+            return GetContentItemCore(name, new[] { extension }, expiresIn);
         }
 
         // This NNNCore pattern allows arg checking to happen synchronously, before starting the async operation.
-        private async Task<IHtmlString> GetContentItemCore(string name, TimeSpan expiresIn)
+        private async Task<IHtmlString> GetContentItemCore(string name, string[] extensions, TimeSpan expiresIn)
         {
             using (Trace.Activity("GetContentItem " + name))
             {
@@ -79,11 +101,7 @@ namespace NuGetGallery
                 Trace.Verbose("Cache Expired.");
 
                 // Get the file from the content service
-                var filenames = new[] {
-                    name + HtmlContentFileExtension,
-                    name + MarkdownContentFileExtension,
-                    name + JsonContentFileExtension
-                };
+                var filenames = extensions.Select(extension => name + extension).ToArray();
 
                 foreach (var filename in filenames)
                 {
@@ -106,9 +124,9 @@ namespace NuGetGallery
             using (Trace.Activity("Downloading Content Item: " + fileName))
             {
                 IFileReference reference = await FileStorage.GetFileReferenceAsync(
-                    Constants.ContentFolderName,
+                    CoreConstants.Folders.ContentFolderName,
                     fileName,
-                    ifNoneMatch: cachedItem == null ? null : cachedItem.ContentId);
+                    ifNoneMatch: cachedItem?.ContentId);
 
                 if (reference == null)
                 {
@@ -123,7 +141,7 @@ namespace NuGetGallery
 
                     // Update the expiry time
                     cachedItem.ExpiryUtc = DateTime.UtcNow + expiresIn;
-                    Trace.Verbose(String.Format("Updating Cache: {0} expires at {1}", fileName, cachedItem.ExpiryUtc));
+                    Trace.Verbose($"Updating Cache: {fileName} expires at {cachedItem.ExpiryUtc}");
                     return cachedItem;
                 }
 

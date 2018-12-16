@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -9,6 +12,7 @@ using Lucene.Net.Documents;
 using Lucene.Net.Index;
 using Lucene.Net.Search;
 using Lucene.Net.Search.Function;
+using NuGet.Services.Entities;
 using NuGet.Services.Search.Models;
 using NuGetGallery.Helpers;
 
@@ -16,7 +20,7 @@ namespace NuGetGallery
 {
     public class LuceneSearchService : ISearchService
     {
-        private Lucene.Net.Store.Directory _directory;
+        private readonly Lucene.Net.Store.Directory _directory;
 
         private static readonly string[] FieldAliases = new[] { "Id", "Title", "Tag", "Tags", "Description", "Author", "Authors", "Owner", "Owners" };
         private static readonly string[] Fields = new[] { "Id", "Title", "Tags", "Description", "Authors", "Owners" };
@@ -32,17 +36,17 @@ namespace NuGetGallery
         {
             if (searchFilter == null)
             {
-                throw new ArgumentNullException("searchFilter");
+                throw new ArgumentNullException(nameof(searchFilter));
             }
 
             if (searchFilter.Skip < 0)
             {
-                throw new ArgumentOutOfRangeException("searchFilter");
+                throw new ArgumentOutOfRangeException(nameof(searchFilter));
             }
 
             if (searchFilter.Take < 0)
             {
-                throw new ArgumentOutOfRangeException("searchFilter");
+                throw new ArgumentOutOfRangeException(nameof(searchFilter));
             }
 
             return Task.FromResult(SearchCore(searchFilter));
@@ -56,7 +60,7 @@ namespace NuGetGallery
             int numRecords = searchFilter.Skip + searchFilter.Take;
 
             var searcher = new IndexSearcher(_directory, readOnly: true);
-            var query = ParseQuery(searchFilter);
+            var query = ParseQuery(searchFilter.SearchTerm);
 
             // IF searching by relevance, boost scores by download count.
             if (searchFilter.SortOrder == SortOrder.Relevance)
@@ -65,20 +69,20 @@ namespace NuGetGallery
                 query = new CustomScoreQuery(query, downloadCountBooster);
             }
 
-            var filterTerm = searchFilter.IncludePrerelease ? "IsLatest" : "IsLatestStable";
-            Query filterQuery = new TermQuery(new Term(filterTerm, Boolean.TrueString));
-            if (searchFilter.CuratedFeed != null)
+            string filterTerm;
+            if (SemVerLevelKey.ForSemVerLevel(searchFilter.SemVerLevel) == SemVerLevelKey.SemVer2)
             {
-                var feedFilterQuery = new TermQuery(new Term("CuratedFeedKey", searchFilter.CuratedFeed.Key.ToString(CultureInfo.InvariantCulture)));
-                BooleanQuery conjunctionQuery = new BooleanQuery();
-                conjunctionQuery.Add(filterQuery, Occur.MUST);
-                conjunctionQuery.Add(feedFilterQuery, Occur.MUST);
-                filterQuery = conjunctionQuery;
+                filterTerm = searchFilter.IncludePrerelease ? "IsLatestSemVer2" : "IsLatestStableSemVer2";
+            }
+            else
+            {
+                filterTerm = searchFilter.IncludePrerelease ? "IsLatest" : "IsLatestStable";
             }
 
+            Query filterQuery = new TermQuery(new Term(filterTerm, Boolean.TrueString));
             Filter filter = new QueryWrapperFilter(filterQuery);
             var results = searcher.Search(query, filter: filter, n: numRecords, sort: new Sort(GetSortField(searchFilter)));
-            
+
             if (results.TotalHits == 0 || searchFilter.CountOnly)
             {
                 return new SearchResults(results.TotalHits, timestamp);
@@ -101,8 +105,11 @@ namespace NuGetGallery
             int key = Int32.Parse(doc.Get("Key"), CultureInfo.InvariantCulture);
             int packageRegistrationKey = Int32.Parse(doc.Get("PackageRegistrationKey"), CultureInfo.InvariantCulture);
             int packageSize = Int32.Parse(doc.Get("PackageFileSize"), CultureInfo.InvariantCulture);
+            bool isVerified = Boolean.Parse(doc.Get("IsVerified-Original"));
             bool isLatest = Boolean.Parse(doc.Get("IsLatest"));
             bool isLatestStable = Boolean.Parse(doc.Get("IsLatestStable"));
+            bool isLatestSemVer2 = Boolean.Parse(doc.Get("IsLatestSemVer2"));
+            bool isLatestStableSemVer2 = Boolean.Parse(doc.Get("IsLatestStableSemVer2"));
             bool requiresLicenseAcceptance = Boolean.Parse(doc.Get("RequiresLicenseAcceptance"));
             DateTime created = DateTime.Parse(doc.Get("Created"), CultureInfo.InvariantCulture);
             DateTime published = DateTime.Parse(doc.Get("Published"), CultureInfo.InvariantCulture);
@@ -120,17 +127,17 @@ namespace NuGetGallery
             }
 
             var owners = doc.Get("FlattenedOwners")
-                            .SplitSafe(new[] {';'}, StringSplitOptions.RemoveEmptyEntries)
-                            .Select(o => new User {Username = o})
+                            .SplitSafe(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(o => new User { Username = o })
                             .ToArray();
             var frameworks =
                 doc.Get("JoinedSupportedFrameworks")
-                   .SplitSafe(new[] {';'}, StringSplitOptions.RemoveEmptyEntries)
-                   .Select(s => new PackageFramework {TargetFramework = s})
+                   .SplitSafe(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                   .Select(s => new PackageFramework { TargetFramework = s })
                    .ToArray();
             var dependencies =
                 doc.Get("FlattenedDependencies")
-                   .SplitSafe(new[] {'|'}, StringSplitOptions.RemoveEmptyEntries)
+                   .SplitSafe(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries)
                    .Select(s => CreateDependency(s))
                    .ToArray();
 
@@ -148,6 +155,8 @@ namespace NuGetGallery
                 IconUrl = doc.Get("IconUrl"),
                 IsLatest = isLatest,
                 IsLatestStable = isLatestStable,
+                IsLatestSemVer2 = isLatestSemVer2,
+                IsLatestStableSemVer2 = isLatestStableSemVer2,
                 Key = key,
                 Language = doc.Get("Language"),
                 LastUpdated = lastUpdated,
@@ -157,6 +166,7 @@ namespace NuGetGallery
                     Id = doc.Get("Id-Original"),
                     DownloadCount = downloadCount,
                     Key = packageRegistrationKey,
+                    IsVerified = isVerified,
                     Owners = owners
                 },
                 PackageRegistrationKey = packageRegistrationKey,
@@ -181,7 +191,7 @@ namespace NuGetGallery
 
         private static PackageDependency CreateDependency(string s)
         {
-            string[] parts = s.SplitSafe(new[] {':'}, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = s.SplitSafe(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
             return new PackageDependency
             {
                 Id = parts.Length > 0 ? parts[0] : null,
@@ -190,13 +200,13 @@ namespace NuGetGallery
             };
         }
 
-        private static Query ParseQuery(SearchFilter searchFilter)
+        private static Query ParseQuery(string searchTerm)
         {
             // 1. parse the query into field clauses and general terms
             // We imagine that mostly, field clauses are meant to 'filter' results found searching for general terms.
             // The resulting clause collections may be empty.
             var queryParser = new NuGetQueryParser();
-            var clauses = queryParser.Parse(searchFilter.SearchTerm).Select(StandardizeSearchTerms).ToList();
+            var clauses = queryParser.Parse(searchTerm).Select(StandardizeSearchTerms).ToList();
             var fieldSpecificTerms = clauses.Where(a => a.Field != null);
             var generalTerms = clauses.Where(a => a.Field == null);
 
@@ -223,7 +233,7 @@ namespace NuGetGallery
             // b) Id-targeted search? [id:Foo bar]
             // c)  Other Field-targeted search? [author:Foo bar]
             bool doExactId = !fieldSpecificQueries.Any();
-            Query generalQuery = BuildGeneralQuery(doExactId, searchFilter.SearchTerm, analyzer, generalTerms, generalQueries);
+            Query generalQuery = BuildGeneralQuery(doExactId, searchTerm, analyzer, generalTerms, generalQueries);
 
             // IF  field targeting is done, we should basically want to AND their field specific queries with all other query terms
             if (fieldSpecificQueries.Any())
@@ -253,7 +263,7 @@ namespace NuGetGallery
             bool doExactId,
             string originalSearchText,
             Analyzer analyzer,
-            IEnumerable<NuGetSearchTerm> generalTerms, 
+            IEnumerable<NuGetSearchTerm> generalTerms,
             IEnumerable<Query> generalQueries)
         {
             // All terms in the multi-term query appear in at least one of the target fields.
@@ -315,7 +325,7 @@ namespace NuGetGallery
             var query = conjuctionQuery.Combine(queriesToCombine.ToArray());
             return query;
         }
-        
+
         // Helper function 
         // 1) fix cases of field names: ID -> Id
         // 2) null out field names that we don't understand (so we will search them as non-field-specific terms)

@@ -1,87 +1,110 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Converters;
+using NuGet.Services.Entities;
+using NuGetGallery.Auditing.AuditedEntities;
 
 namespace NuGetGallery.Auditing
 {
-    public class UserAuditRecord : AuditRecord<UserAuditAction>
+    public class UserAuditRecord : AuditRecord<AuditedUserAction>
     {
-        public string Username { get; set; }
-        public string EmailAddress { get; set; }
-        public string UnconfirmedEmailAddress { get; set; }
-        public string[] Roles { get; set; }
-        public CredentialAuditRecord[] Credentials { get; set; }
-        public CredentialAuditRecord[] AffectedCredential { get; set; }
-        public string AffectedEmailAddress { get; set; }
-        
-        public UserAuditRecord(User user, UserAuditAction action)
-            : this(user, action, Enumerable.Empty<Credential>()) { }
-        public UserAuditRecord(User user, UserAuditAction action, Credential affected)
-            : this(user, action, SingleEnumerable(affected)) { }
-        public UserAuditRecord(User user, UserAuditAction action, IEnumerable<Credential> affected)
+        public string Username { get; }
+        public string EmailAddress { get; }
+        public string UnconfirmedEmailAddress { get; }
+        public string[] Roles { get; }
+        public CredentialAuditRecord[] Credentials { get; }
+
+        /// <summary>
+        /// The credential affected by <see cref="AuditRecord{T}.Action"/>.
+        /// </summary>
+        public CredentialAuditRecord[] AffectedCredential { get; }
+
+        /// <summary>
+        /// The email address affected by <see cref="AuditRecord{T}.Action"/>.
+        /// </summary>
+        public string AffectedEmailAddress { get; }
+
+        /// <summary>
+        /// The username of the member affected by <see cref="AuditRecord{T}.Action"/>.
+        /// </summary>
+        public string AffectedMemberUsername { get; }
+
+        /// <summary>
+        /// Whether or not the member affected by <see cref="AuditRecord{T}.Action"/> is an administrator or not.
+        /// </summary>
+        public bool AffectedMemberIsAdmin { get; }
+
+        /// <summary>
+        /// Subset of user policies affected by <see cref="AuditRecord{T}.Action"/>.
+        /// </summary>
+        public AuditedUserSecurityPolicy[] AffectedPolicies { get; }
+
+        public UserAuditRecord(User user, AuditedUserAction action)
             : base(action)
         {
+            if (user == null)
+            {
+                throw new ArgumentNullException(nameof(user));
+            }
+
             Username = user.Username;
             EmailAddress = user.EmailAddress;
             UnconfirmedEmailAddress = user.UnconfirmedEmailAddress;
             Roles = user.Roles.Select(r => r.Name).ToArray();
-            Credentials = user.Credentials.Select(c => new CredentialAuditRecord(c, removed: false)).ToArray();
 
-            if (affected != null)
-            {
-                AffectedCredential = affected.Select(c => new CredentialAuditRecord(c, action == UserAuditAction.RemovedCredential)).ToArray();
-            }
+            Credentials = user.Credentials.Where(CredentialTypes.IsSupportedCredential)
+                                          .Select(c => new CredentialAuditRecord(c, removed: false)).ToArray();
 
-            Action = action;
+            AffectedCredential = new CredentialAuditRecord[0];
+            AffectedPolicies = new AuditedUserSecurityPolicy[0];
         }
-        
-        public UserAuditRecord(User user, UserAuditAction action, string affectedEmailAddress)
-            : this(user, action, Enumerable.Empty<Credential>()) {
+
+        public UserAuditRecord(User user, AuditedUserAction action, Credential affected)
+            : this(user, action, new[] { affected })
+        {
+        }
+
+        public UserAuditRecord(User user, AuditedUserAction action, IEnumerable<Credential> affected)
+            : this(user, action)
+        {
+            AffectedCredential = affected.Select(c => new CredentialAuditRecord(c, action == AuditedUserAction.RemoveCredential)).ToArray();
+        }
+
+        public UserAuditRecord(User user, AuditedUserAction action, string affectedEmailAddress)
+            : this(user, action)
+        {
             AffectedEmailAddress = affectedEmailAddress;
         }
-        
+
+        public UserAuditRecord(User user, AuditedUserAction action, User affectedMember, bool affectedMemberIsAdmin)
+            : this(user, action)
+        {
+            AffectedMemberUsername = affectedMember.Username;
+            AffectedMemberIsAdmin = affectedMemberIsAdmin;
+        }
+
+        public UserAuditRecord(User user, AuditedUserAction action, Membership affectedMembership)
+            : this(user, action, affectedMembership.Member, affectedMembership.IsAdmin)
+        {
+        }
+
+        public UserAuditRecord(User user, AuditedUserAction action, IEnumerable<UserSecurityPolicy> affectedPolicies)
+            : this(user, action)
+        {
+            if (affectedPolicies == null || affectedPolicies.Count() == 0)
+            {
+                throw new ArgumentException(nameof(affectedPolicies));
+            }
+
+            AffectedPolicies = affectedPolicies.Select(p => new AuditedUserSecurityPolicy(p)).ToArray();
+        }
+
         public override string GetPath()
         {
             return Username.ToLowerInvariant();
         }
-
-        private static IEnumerable<Credential> SingleEnumerable(Credential affected)
-        {
-            yield return affected;
-        }
-    }
-
-    public class CredentialAuditRecord
-    {
-        public string Type { get; set; }
-        public string Value { get; set; }
-        public string Identity { get; set; }
-
-        public CredentialAuditRecord(Credential credential, bool removed)
-        {
-            Type = credential.Type;
-            Identity = credential.Identity;
-
-            // Track the value for credentials that are definitely revokable (API Key, etc.) and have been removed
-            if (removed && !CredentialTypes.IsPassword(credential.Type))
-            {
-                Value = credential.Value;
-            }
-        }
-    }
-
-    public enum UserAuditAction
-    {
-        Registered,
-        AddedCredential,
-        RemovedCredential,
-        RequestedPasswordReset,
-        ChangeEmail,
-        CancelChangeEmail,
-        ConfirmEmail,
     }
 }

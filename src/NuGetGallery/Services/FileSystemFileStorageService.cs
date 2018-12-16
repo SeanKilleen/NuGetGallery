@@ -1,10 +1,14 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+
+using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
-using System.Web;
 using System.Web.Hosting;
 using System.Web.Mvc;
+using Microsoft.WindowsAzure.Storage.Blob;
 using NuGetGallery.Configuration;
 
 namespace NuGetGallery
@@ -22,14 +26,14 @@ namespace NuGetGallery
 
         public Task<ActionResult> CreateDownloadFileActionResultAsync(Uri requestUrl, string folderName, string fileName)
         {
-            if (String.IsNullOrWhiteSpace(folderName))
+            if (string.IsNullOrWhiteSpace(folderName))
             {
-                throw new ArgumentNullException("folderName");
+                throw new ArgumentNullException(nameof(folderName));
             }
 
-            if (String.IsNullOrWhiteSpace(fileName))
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                throw new ArgumentNullException("fileName");
+                throw new ArgumentNullException(nameof(fileName));
             }
 
             var path = BuildPath(_configuration.FileStorageDirectory, folderName, fileName);
@@ -48,13 +52,14 @@ namespace NuGetGallery
 
         public Task DeleteFileAsync(string folderName, string fileName)
         {
-            if (String.IsNullOrWhiteSpace(folderName))
+            if (string.IsNullOrWhiteSpace(folderName))
             {
-                throw new ArgumentNullException("folderName");
+                throw new ArgumentNullException(nameof(folderName));
             }
-            if (String.IsNullOrWhiteSpace(fileName))
+
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                throw new ArgumentNullException("fileName");
+                throw new ArgumentNullException(nameof(fileName));
             }
 
             var path = BuildPath(_configuration.FileStorageDirectory, folderName, fileName);
@@ -68,13 +73,14 @@ namespace NuGetGallery
 
         public Task<bool> FileExistsAsync(string folderName, string fileName)
         {
-            if (String.IsNullOrWhiteSpace(folderName))
+            if (string.IsNullOrWhiteSpace(folderName))
             {
-                throw new ArgumentNullException("folderName");
+                throw new ArgumentNullException(nameof(folderName));
             }
-            if (String.IsNullOrWhiteSpace(fileName))
+
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                throw new ArgumentNullException("fileName");
+                throw new ArgumentNullException(nameof(fileName));
             }
 
             var path = BuildPath(_configuration.FileStorageDirectory, folderName, fileName);
@@ -85,13 +91,14 @@ namespace NuGetGallery
 
         public Task<Stream> GetFileAsync(string folderName, string fileName)
         {
-            if (String.IsNullOrWhiteSpace(folderName))
+            if (string.IsNullOrWhiteSpace(folderName))
             {
-                throw new ArgumentNullException("folderName");
+                throw new ArgumentNullException(nameof(folderName));
             }
-            if (String.IsNullOrWhiteSpace(fileName))
+
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                throw new ArgumentNullException("fileName");
+                throw new ArgumentNullException(nameof(fileName));
             }
 
             var path = BuildPath(_configuration.FileStorageDirectory, folderName, fileName);
@@ -102,13 +109,14 @@ namespace NuGetGallery
 
         public Task<IFileReference> GetFileReferenceAsync(string folderName, string fileName, string ifNoneMatch = null)
         {
-            if (String.IsNullOrWhiteSpace(folderName))
+            if (string.IsNullOrWhiteSpace(folderName))
             {
-                throw new ArgumentNullException("folderName");
+                throw new ArgumentNullException(nameof(folderName));
             }
-            if (String.IsNullOrWhiteSpace(fileName))
+
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                throw new ArgumentNullException("fileName");
+                throw new ArgumentNullException(nameof(fileName));
             }
 
             var path = BuildPath(_configuration.FileStorageDirectory, folderName, fileName);
@@ -118,43 +126,149 @@ namespace NuGetGallery
             return Task.FromResult<IFileReference>(file.Exists ? new LocalFileReference(file) : null);
         }
 
-        public Task SaveFileAsync(string folderName, string fileName, Stream packageFile)
+        public Task SaveFileAsync(string folderName, string fileName, string contentType, Stream file, bool overwrite = true)
         {
-            if (String.IsNullOrWhiteSpace(folderName))
+            // file system does not support content type, so we'll simply ignore it
+            return SaveFileAsync(folderName, fileName, file, overwrite);
+        }
+
+        public Task SaveFileAsync(string folderName, string fileName, Stream packageFile, bool overwrite = true)
+        {
+            if (string.IsNullOrWhiteSpace(folderName))
             {
-                throw new ArgumentNullException("folderName");
+                throw new ArgumentNullException(nameof(folderName));
             }
 
-            if (String.IsNullOrWhiteSpace(fileName))
+            if (string.IsNullOrWhiteSpace(fileName))
             {
-                throw new ArgumentNullException("fileName");
+                throw new ArgumentNullException(nameof(fileName));
             }
 
             if (packageFile == null)
             {
-                throw new ArgumentNullException("packageFile");
-            }
-
-            var storageDirectory = ResolvePath(_configuration.FileStorageDirectory);
-
-            if (!_fileSystemService.DirectoryExists(storageDirectory))
-            {
-                _fileSystemService.CreateDirectory(storageDirectory);
-            }
-
-            var folderPath = Path.Combine(storageDirectory, folderName);
-            if (!_fileSystemService.DirectoryExists(folderPath))
-            {
-                _fileSystemService.CreateDirectory(folderPath);
+                throw new ArgumentNullException(nameof(packageFile));
             }
 
             var filePath = BuildPath(_configuration.FileStorageDirectory, folderName, fileName);
-            using (var file = _fileSystemService.OpenWrite(filePath))
+
+            var dirPath = Path.GetDirectoryName(filePath);
+
+            _fileSystemService.CreateDirectory(dirPath);
+
+            try
             {
-                packageFile.CopyTo(file);
+                using (var file = _fileSystemService.OpenWrite(filePath, overwrite))
+                {
+                    packageFile.CopyTo(file);
+                }
+            }
+            catch (IOException ex)
+            {
+                throw new FileAlreadyExistsException(
+                    string.Format(
+                        CultureInfo.CurrentCulture,
+                        "There is already a file with name {0} in folder {1}.",
+                        fileName,
+                        folderName),
+                    ex);
             }
 
             return Task.FromResult(0);
+        }
+
+        public async Task SaveFileAsync(string folderName, string fileName, Stream file, IAccessCondition condition)
+        {
+            await SaveFileAsync(folderName, fileName, file);
+        }
+
+        public Task CopyFileAsync(Uri srcUri, string destFolderName, string destFileName, IAccessCondition destAccessCondition)
+        {
+            // We could theoretically support this by downloading the source URI to the destination path. This is not
+            // needed today so this method will remain unimplemented until it is needed.
+            throw new NotImplementedException();
+        }
+
+        public Task<string> CopyFileAsync(
+            string srcFolderName,
+            string srcFileName,
+            string destFolderName,
+            string destFileName,
+            IAccessCondition destAccessCondition)
+        {
+            if (srcFolderName == null)
+            {
+                throw new ArgumentNullException(nameof(srcFolderName));
+            }
+
+            if (srcFileName == null)
+            {
+                throw new ArgumentNullException(nameof(srcFileName));
+            }
+
+            if (destFolderName == null)
+            {
+                throw new ArgumentNullException(nameof(destFolderName));
+            }
+
+            if (destFileName == null)
+            {
+                throw new ArgumentNullException(nameof(destFileName));
+            }
+
+            var srcFilePath = BuildPath(_configuration.FileStorageDirectory, srcFolderName, srcFileName);
+            var destFilePath = BuildPath(_configuration.FileStorageDirectory, destFolderName, destFileName);
+
+            _fileSystemService.CreateDirectory(Path.GetDirectoryName(destFilePath));
+
+            try
+            {
+                _fileSystemService.Copy(srcFilePath, destFilePath, overwrite: false);
+            }
+            catch (IOException e)
+            {
+                throw new FileAlreadyExistsException("Could not copy because destination file already exists", e);
+            }
+
+            return Task.FromResult<string>(null);
+        }
+
+        public Task<bool> IsAvailableAsync()
+        {
+            return Task.FromResult(Directory.Exists(_configuration.FileStorageDirectory));
+        }
+
+        public Task<Uri> GetFileReadUriAsync(string folderName, string fileName, DateTimeOffset? endOfAccess)
+        {
+            // technically, we would be able to generate the file:/// url here, but we don't need it right now
+            // and implementation would be a bit non-trivial: System.Uri handles the "%" character in paths 
+            // in a funny way: 
+            // new Uri(@"c:\%41foo%20bar%25.baz")
+            // produces the
+            // file:///c:/Afoo%20bar%2525.baz
+            // which is not particularly correct, so we'd need to work around that to have a correct implementation
+            throw new NotImplementedException();
+        }
+
+        public Task<Uri> GetPriviledgedFileUriAsync(string folderName, string fileName, FileUriPermissions permissions, DateTimeOffset endOfAccess)
+        {
+            /// Not implemented for the same reason as <see cref="GetFileReadUriAsync(string, string, DateTimeOffset?)"/>.
+            throw new NotImplementedException();
+        }
+
+        public Task SetMetadataAsync(
+            string folderName,
+            string fileName,
+            Func<Lazy<Task<Stream>>, IDictionary<string, string>, Task<bool>> updateMetadataAsync)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task SetPropertiesAsync(
+            string folderName,
+            string fileName, 
+            Func<Lazy<Task<Stream>>, BlobProperties, Task<bool>> updatePropertiesAsync)
+        {
+            return Task.CompletedTask;
         }
 
         private static string BuildPath(string fileStorageDirectory, string folderName, string fileName)
@@ -165,7 +279,7 @@ namespace NuGetGallery
             return Path.Combine(fileStorageDirectory, folderName, fileName);
         }
 
-        private static string ResolvePath(string fileStorageDirectory)
+        public static string ResolvePath(string fileStorageDirectory)
         {
             if (fileStorageDirectory.StartsWith("~/", StringComparison.OrdinalIgnoreCase) && HostingEnvironment.IsHosted)
             {
@@ -174,19 +288,27 @@ namespace NuGetGallery
             return fileStorageDirectory;
         }
 
+        public Task<string> GetETagOrNullAsync(
+           string folderName,
+           string fileName)
+        {
+            throw new NotImplementedException(nameof(GetETagOrNullAsync));
+        }
+
         private static string GetContentType(string folderName)
         {
             switch (folderName)
             {
-                case Constants.PackagesFolderName:
-                    return Constants.PackageContentType;
+                case CoreConstants.Folders.PackagesFolderName:
+                case CoreConstants.Folders.SymbolPackagesFolderName:
+                    return CoreConstants.PackageContentType;
 
-                case Constants.DownloadsFolderName:
-                    return Constants.OctetStreamContentType;
+                case CoreConstants.Folders.DownloadsFolderName:
+                    return CoreConstants.OctetStreamContentType;
 
                 default:
                     throw new InvalidOperationException(
-                        String.Format(CultureInfo.CurrentCulture, "The folder name {0} is not supported.", folderName));
+                        string.Format(CultureInfo.CurrentCulture, "The folder name {0} is not supported.", folderName));
             }
         }
     }

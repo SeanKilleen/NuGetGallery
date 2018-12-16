@@ -1,4 +1,6 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -71,7 +73,7 @@ namespace NuGetGallery.Diagnostics
                     double max = Double.MinValue;
 
                     // Start at _position-1 and work backwards. 
-                    // In order to avoid negative indicies, we do this by ADDING the distance between the end of ring and i, 
+                    // In order to avoid negative indices, we do this by ADDING the distance between the end of ring and i, 
                     //  then we use mod to get a real offset
                     for (int i = 0; i < _count; i++)
                     {

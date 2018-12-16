@@ -1,4 +1,6 @@
-﻿using System.Text.RegularExpressions;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System.Text.RegularExpressions;
 using Xunit;
 using Xunit.Extensions;
 
@@ -17,7 +19,7 @@ namespace NuGetGallery
         [InlineData("a@b.c.d.e.f")]
         public void TheWholeAllows(string address)
         {
-            var match = new Regex(RegisterViewModel.EmailValidationRegex).IsMatch(address);
+            var match = new Regex(GalleryConstants.EmailValidationRegex).IsMatch(address);
             Assert.True(match);
         }
 
@@ -27,7 +29,7 @@ namespace NuGetGallery
         [InlineData("fred@.com")]
         public void TheWholeDoesntAllow(string testWhole)
         {
-            var match = new Regex(RegisterViewModel.EmailValidationRegex).IsMatch(testWhole);
+            var match = new Regex(GalleryConstants.EmailValidationRegex).IsMatch(testWhole);
             Assert.False(match);
         }
 
@@ -41,7 +43,7 @@ namespace NuGetGallery
         [InlineData("fred~`'.baz")]
         public void TheFirstPartMatches(string testFirstPart)
         {
-            var match = new Regex("^" + RegisterViewModel.FirstPart + "$").IsMatch(testFirstPart);
+            var match = new Regex("^" + GalleryConstants.EmailValidationRegexFirstPart + "$").IsMatch(testFirstPart);
             Assert.True(match);
         }
 
@@ -56,7 +58,7 @@ namespace NuGetGallery
         [InlineData("abc.\"def\\\"\"ghi\".xyz")] // thanks Wikipedia, but in practice nobody uses these email addresses.
         public void TheFirstPartDoesntAllow(string testFirstPart)
         {
-            var match = new Regex("^" + RegisterViewModel.FirstPart + "$").IsMatch(testFirstPart);
+            var match = new Regex("^" + GalleryConstants.EmailValidationRegexFirstPart + "$").IsMatch(testFirstPart);
             Assert.False(match);
         }
 
@@ -69,7 +71,7 @@ namespace NuGetGallery
         [InlineData("a.b.c.d.e.f")]
         public void TheSecondPartMatches(string testSecondPart)
         {
-            var match = new Regex("^" + RegisterViewModel.SecondPart + "$").IsMatch(testSecondPart);
+            var match = new Regex("^" + GalleryConstants.EmailValidationRegexSecondPart + "$").IsMatch(testSecondPart);
             Assert.True(match);
         }
 
@@ -81,7 +83,7 @@ namespace NuGetGallery
         [InlineData("[IPv6:2001:db8:1ff::a0b:dbd0]")] //no IP addresses
         public void TheSecondPartDoesntAllow(string testSecondPart)
         {
-            var match = new Regex("^" + RegisterViewModel.SecondPart + "$").IsMatch(testSecondPart);
+            var match = new Regex("^" + GalleryConstants.EmailValidationRegexSecondPart + "$").IsMatch(testSecondPart);
             Assert.False(match);
         }
     }

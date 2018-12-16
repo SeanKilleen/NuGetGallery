@@ -1,9 +1,8 @@
-﻿using System;
+﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 using System.Web.Mvc;
 using System.Web.Routing;
 using Xunit;
@@ -47,6 +46,14 @@ namespace NuGetGallery
             DictionariesMatch(new RouteValueDictionary(expectedRouteData), redirect.RouteValues);
             Assert.Equal(permanent, redirect.Permanent);
             Assert.Equal(routeName, redirect.RouteName);
+            return redirect;
+        }
+
+        public static RedirectResult IsRedirect(ActionResult result, bool permanent, string url)
+        {
+            var redirect = Assert.IsType<RedirectResult>(result);
+            Assert.Equal(permanent, redirect.Permanent);
+            Assert.Equal(url, redirect.Url);
             return redirect;
         }
 
@@ -94,12 +101,12 @@ namespace NuGetGallery
 
         public static HttpStatusCodeResult IsStatusCode(ActionResult result, HttpStatusCode statusCode)
         {
-            return IsStatusCode(result, (int)statusCode, description: null);
+            return IsStatusCode(result, (int)statusCode, description: null, ignoreEmptyDescription: true);
         }
 
         public static HttpStatusCodeResult IsStatusCode(ActionResult result, int statusCode)
         {
-            return IsStatusCode(result, statusCode, description: null);
+            return IsStatusCode(result, statusCode, description: null, ignoreEmptyDescription: true);
         }
 
         public static HttpStatusCodeResult IsStatusCode(ActionResult result, HttpStatusCode statusCode, string description)
@@ -107,11 +114,16 @@ namespace NuGetGallery
             return IsStatusCode(result, (int)statusCode, description);
         }
 
-        public static HttpStatusCodeResult IsStatusCode(ActionResult result, int statusCode, string description)
+        public static HttpStatusCodeResult IsStatusCode(ActionResult result, int statusCode, string description, bool ignoreEmptyDescription = false)
         {
             var statusCodeResult = Assert.IsAssignableFrom<HttpStatusCodeResult>(result);
             Assert.Equal(statusCode, statusCodeResult.StatusCode);
-            Assert.Equal(description, statusCodeResult.StatusDescription);
+
+            if (!string.IsNullOrEmpty(description) || !ignoreEmptyDescription)
+            {
+                Assert.Equal(description, statusCodeResult.StatusDescription);
+            }
+
             return statusCodeResult;
         }
 
@@ -120,10 +132,22 @@ namespace NuGetGallery
             return Assert.IsType<EmptyResult>(result);
         }
 
+        public static ChallengeResult IsChallengeResult(ActionResult result, string provider)
+        {
+            var challenge = Assert.IsType<ChallengeResult>(result);
+            Assert.Equal(provider, challenge.LoginProvider);
+            return challenge;
+        }
+
         public static ChallengeResult IsChallengeResult(ActionResult result, string provider, string redirectUrl)
         {
             var challenge = Assert.IsType<ChallengeResult>(result);
-            Assert.Equal(redirectUrl, challenge.RedirectUri);
+
+            // Need to ignore case as Url.Action and HttpUtility.UrlEncode may use different casing for escaped characters...
+            // /users/account/authenticate/return?ReturnUrl=https%3a%2f%2flocalhost%2ftheReturnUrl
+            // /users/account/authenticate/return?ReturnUrl=https%3A%2F%2Flocalhost%2FtheReturnUrl
+            Assert.Equal(redirectUrl, challenge.RedirectUri, ignoreCase: true);
+
             Assert.Equal(provider, challenge.LoginProvider);
             return challenge;
         }
